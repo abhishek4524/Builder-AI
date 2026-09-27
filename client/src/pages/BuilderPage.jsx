@@ -37,18 +37,18 @@ const BuilderPage = () => {
     loadProject(id);
   }, [id]);
 
-  useEffect(() => {
-    if (!id || !activeProjects) return;
-    if (
-      activeProjects.status === "pending" ||
-      activeProjects.status === "generating"
-    ) {
-      const interval = setInterval(() => {
-        loadProject(id, true);
-      }, 1500);
-      return () => clearInterval(interval);
-    }
-  }, [id, loadProject, activeProjects]);
+  // useEffect(() => {
+  //   if (!id || !activeProjects) return;
+  //   if (
+  //     activeProjects.status === "pending" ||
+  //     activeProjects.status === "generating"
+  //   ) {
+  //     const interval = setInterval(() => {
+  //       loadProject(id, true);
+  //     }, 1500);
+  //     return () => clearInterval(interval);
+  //   }
+  // }, [id, loadProject, activeProjects]);
 
   const handleOpenPreview = () => {
     if (!id) return;
