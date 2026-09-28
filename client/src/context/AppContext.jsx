@@ -81,8 +81,12 @@ export function AppContextProvider({ children }) {
     };
 
     // Projects Actions
-    const loadProjects = async () => {
-        if (!user) return;
+    const loadProjects = useCallback(async () => {
+        if (!user) {
+            setProjects([]);
+            setLoadingProjects(false);
+            return;
+        }
 
         try {
             const { data } = await api.get('/api/projects');
@@ -93,9 +97,9 @@ export function AppContextProvider({ children }) {
         } finally {
             setLoadingProjects(false);
         }
-    };
+    }, [user]);
 
-    const loadProject = async (id, silent = false) => {
+    const loadProject = useCallback(async (id, silent = false) => {
         if (!user) return;
 
         if (!silent) setLoadingActiveProjects(true);
@@ -121,7 +125,7 @@ export function AppContextProvider({ children }) {
         } finally {
             if (!silent) setLoadingActiveProjects(false);
         }
-    };
+    }, [navigate, user]);
 
     useEffect(() => {
         if (!activeProjects?._id || !user) return;
