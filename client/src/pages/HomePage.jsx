@@ -28,10 +28,10 @@ loadProjects()
       {/* Nav */}
       <nav className="sticky top-0 z-10 flex itmes-center justify-between px-6 py-4">
         <div className="flex items-center gap-2">
-          <img src="/logo.svg" alt="logo" className="size-6" />
-          <span className="text-xl font-semibold tracking-tight">
-            BuilderAI
-          </span>
+          <img src="/logo.png" alt="logo" className="size-6" />
+          {/* <span className="text-xl font-semibold tracking-tight">
+            i1
+          </span>  */}
         </div>
         <div className="flex itmes-center gap-4 text-sm font-medium text-zinc-300">
           <span>{user?.name}</span>

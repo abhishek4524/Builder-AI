@@ -41,7 +41,7 @@ const PublishPage = () => {
         </h1>
         <p className='text-sm text-zinc-500 max-w-sm leading-relaxed mb-6'>{error}</p>
         <div className='text-[10px] font-semibold uppercase tracking-widest text-zinc-400'>
-          BuilderAI
+          i1
         </div>
       </div>
     )
