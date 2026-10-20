@@ -25,6 +25,9 @@ const ProjectSchema = new Schema(
     filesGenerated: { type: [String], default: [] },
     currentFile: { type: String, default: null },
     error: { type: String, default: null },
+    generationStartedAt: { type: Date, default: Date.now },
+    generationDuration: { type: Number, default: null },
+    completedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

@@ -3,8 +3,8 @@ import dns from "node:dns"
 
 export async function connectToDatabase() {
     try {
-        // Use Windows DNS server for MongoDB SRV lookup
-        dns.setServers(["192.168.1.1"]);
+        // Use reliable DNS servers for MongoDB SRV lookup
+        dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
         await mongoose.connect(process.env.MONGODB_URI);
 

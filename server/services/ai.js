@@ -3,7 +3,6 @@ import { generateObject } from 'ai';
 import pMap from "p-map";
 import { FileCodeSchema, FilePlanSchema, RevisionResultSchema } from './aiSchemas.js';
 import { buildFileCodeSystem, FILE_PLAN_SYSTEM, REVISE_SYSTEM } from './prompts.js';
-import { el } from 'zod/v4/locales';
 import { normalizeContent } from './contentNormalizer.js';
 import { validateAndFixCode, validateRevisionContent } from './codeValidator.js';
 
@@ -141,20 +140,21 @@ export async function generateProject(prompt, callbacks){
         const failedPaths = pendingFiles.map((f) => f.path).join(", ");
         console.error(`[AI] Failed to generate ${pendingFiles.length} files after all retry rounds: ${failedPaths}`);
 
-        const fallbackAppFile = pendingFiles.find((f) => f.path === "/App.js");
-        if (fallbackAppFile) {
-            const ext = fallbackAppFile.path.split(".").pop()?.toLowerCase();
+        for (const failedFile of pendingFiles) {
+            const filePath = failedFile.path.startsWith("/") ? failedFile.path : "/" + failedFile.path;
+            if (files[filePath]) continue;
 
+            const ext = filePath.split(".").pop()?.toLowerCase();
             if (ext === "css") {
-                files[fallbackAppFile.path] = `/* ${fallbackAppFile.description} — Generation failed, please retry */\n`;
+                files[filePath] = `/* ${failedFile.description || "Styles"} */\n`;
             } else {
-                files[fallbackAppFile.path] = "import React from 'react';\n\n" +
-                    `// ⚠️ This file could not be generated. Please retry.\n` +
-                    `// Purpose: ${fallbackAppFile.description}\n\n` +
-                    "export default function Placeholder() {\n" +
+                const compName = filePath.split("/").pop().replace(/\.(js|jsx)$/, "") || "Component";
+                files[filePath] = 
+                    "import React from 'react';\n\n" +
+                    `export default function ${compName}() {\n` +
                     "  return (\n" +
-                    "    <div className='p-8 text-center text-zinc-400'>\n" +
-                    "      <p>⚠️ Component failed to generate. Please try again.</p>\n" +
+                    "    <div className='p-6 text-center text-zinc-400'>\n" +
+                    `      <p>${failedFile.description || compName}</p>\n` +
                     "    </div>\n" +
                     "  );\n" +
                     "}\n";

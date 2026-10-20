@@ -19,6 +19,7 @@ export async function createProject(req, res) {
         return;
     }
 
+    const now = new Date();
     const project = await Project.create({
         name: "Planning project...",
         description: prompt,
@@ -34,6 +35,9 @@ export async function createProject(req, res) {
         filesGenerated: [],
         currentFile: null,
         error: null,
+        generationStartedAt: now,
+        generationDuration: null,
+        completedAt: null,
     });
 
     runBackgroundGeneration(project._id.toString(), prompt).catch((err) => {
@@ -52,6 +56,9 @@ export async function createProject(req, res) {
         filesGenerated: project.filesGenerated,
         currentFile: project.currentFile,
         error: project.error,
+        generationStartedAt: project.generationStartedAt,
+        generationDuration: project.generationDuration,
+        completedAt: project.completedAt,
         createdAt: project.createdAt,
     });
 }
@@ -60,6 +67,8 @@ export async function createProject(req, res) {
 async function runBackgroundGeneration(projectId, prompt) {
     try {
         console.log(`[Background AI] Starting generation for project ${projectId}`);
+        let saveQueue = Promise.resolve();
+
         const result = await generateProject(prompt, {
             onPlan: async (plan) => {
                 console.log(`[Background AI] Plan created for project ${projectId}. Planned ${plan.files.length} files.`);
@@ -84,22 +93,30 @@ async function runBackgroundGeneration(projectId, prompt) {
             },
             onFileComplete: async (path, code) => {
                 console.log(`[Background AI] Finished file ${path} for project ${projectId}`);
-                const project = await Project.findById(projectId);
-                if (!project) return;
+                saveQueue = saveQueue.then(async () => {
+                    const project = await Project.findById(projectId);
+                    if (!project) return;
 
-                project.files = project.files || {};
-                project.files[path] = { content: code, hash: hashContent(code) };
-                project.filesGenerated = Array.from(new Set([...(project.filesGenerated || []), path]));
-                project.messages.push({
-                    role: "assistant",
-                    content: `Created file "${path}"`,
-                    timestamp: new Date(),
+                    project.files = project.files || {};
+                    project.files[path] = { content: code, hash: hashContent(code) };
+                    project.filesGenerated = Array.from(new Set([...(project.filesGenerated || []), path]));
+                    project.messages.push({
+                        role: "assistant",
+                        content: `Created file "${path}"`,
+                        timestamp: new Date(),
+                    });
+                    project.currentFile = null;
+                    project.markModified("files");
+                    await project.save();
+                }).catch((err) => {
+                    console.error(`[Background AI] Error saving file ${path}:`, err);
                 });
-                project.currentFile = null;
-                project.markModified("files");
-                await project.save();
+                await saveQueue;
             },
         });
+
+        // Ensure all concurrent file saves have finished flushing to DB
+        await saveQueue;
 
         console.log(`[Background AI] Successfully generated project ${projectId}`);
         const project = await Project.findById(projectId);
@@ -109,17 +126,26 @@ async function runBackgroundGeneration(projectId, prompt) {
             if (result.description) {
                 project.name = result.description;
             }
+            const startTime = project.generationStartedAt || project.createdAt || new Date();
+            const durationSec = Math.max(1, Math.round((Date.now() - new Date(startTime).getTime()) / 1000));
+            project.generationDuration = durationSec;
+            project.completedAt = new Date();
             project.messages.push({
                 role: "assistant",
-                content: "Website generation complete! You can view and edit the files.",
+                content: `Website generation complete in ${durationSec}s! You can view and edit the files.`,
                 timestamp: new Date(),
             });
             await project.save();
         }
     } catch (err) {
         console.error(`[Background AI] Fatal generation error for project ${projectId}:`, err);
+        const project = await Project.findById(projectId);
+        const startTime = project?.generationStartedAt || project?.createdAt || new Date();
+        const durationSec = Math.max(1, Math.round((Date.now() - new Date(startTime).getTime()) / 1000));
         await Project.findByIdAndUpdate(projectId, {
             status: "failed",
+            generationDuration: durationSec,
+            completedAt: new Date(),
             error: err.message || "Unknown generation error",
             $push: {
                 messages: {
@@ -142,7 +168,7 @@ export async function listProjects(req, res) {
 
     const projects = await Project.find(
         { owner: req.user.userId },
-        { name: 1, description: 1, version: 1, createdAt: 1, updatedAt: 1 }
+        { name: 1, description: 1, version: 1, createdAt: 1, updatedAt: 1, generationDuration: 1, status: 1 }
     ).sort({ updatedAt: -1 });
 
     res.json(projects);
@@ -179,6 +205,9 @@ export async function getProject(req, res) {
         filesGenerated: project.filesGenerated,
         currentFile: project.currentFile,
         error: project.error,
+        generationStartedAt: project.generationStartedAt || project.createdAt,
+        generationDuration: project.generationDuration,
+        completedAt: project.completedAt,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
     });
@@ -215,6 +244,11 @@ export async function updateProjectFiles(req, res) {
     const project = await Project.findOne({ _id: req.params.id, owner: req.user.userId });
     if (!project) {
         res.status(404).json({ error: "Project not found" });
+        return;
+    }
+
+    if (project.status === "generating" || project.status === "pending") {
+        res.status(400).json({ error: "Cannot modify files while website generation is in progress" });
         return;
     }
 

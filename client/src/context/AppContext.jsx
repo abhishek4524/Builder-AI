@@ -227,6 +227,7 @@ export function AppContextProvider({ children }) {
     const updateProjectFiles = useCallback(
         async (files) => {
             if (!activeProjects || !user) return;
+            if (activeProjects.status === "generating" || activeProjects.status === "pending") return;
             debouncedSave(files, activeProjects._id);
         },
         [activeProjects, user, debouncedSave]

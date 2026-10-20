@@ -3,7 +3,7 @@ import { useAppContext } from "../context/AppContext";
 import PromptInput from "../components/PromptInput";
 import { homeTags } from "../assets/assets";
 import { useNavigate } from "react-router-dom";
-import { ArrowRightIcon, ClockIcon, Trash2Icon } from "lucide-react";
+import { ArrowRightIcon, ClockIcon, TimerIcon, Trash2Icon } from "lucide-react";
 import moment from "moment"
 
 const HomePage = () => {
@@ -106,6 +106,14 @@ loadProjects()
                         <span className="text-xs text-white/60 font-medium">
                         v{p.version}
                         </span>
+                        {p.generationDuration ? (
+                          <span className="text-xs text-emerald-400/90 flex items-center gap-1 font-mono font-medium">
+                            <TimerIcon size={10} />
+                            {p.generationDuration < 60
+                              ? `${p.generationDuration}s`
+                              : `${Math.floor(p.generationDuration / 60)}m ${p.generationDuration % 60}s`}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
 

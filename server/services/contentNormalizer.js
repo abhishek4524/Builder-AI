@@ -10,6 +10,11 @@ export function normalizeContent(content) {
     // Normalize \r\n to \n
     content = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
+    // Decode HTML entities that models output instead of raw newlines and whitespace in JSON
+    content = content.replace(/&(?:#10|10|n);/gi, "\n");
+    content = content.replace(/&nbsp;/gi, " ");
+    content = content.replace(/&quot;/gi, '"');
+
     const realNewlines = (content.match(/\n/g) || []).length;
     const literalBackslashN = (content.match(/\\n/g) || []).length;
 

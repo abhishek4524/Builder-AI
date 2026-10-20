@@ -1,18 +1,46 @@
-import { CheckCircle2Icon, CircleIcon, Loader2Icon } from "lucide-react";
+import { useState, useEffect } from "react";
+import { CheckCircle2Icon, CircleIcon, Loader2Icon, TimerIcon } from "lucide-react";
+import { formatTimer, formatDuration } from "../utils/timeUtils";
 
 export default function AgentProgressDashboard({ project }) {
     const planned = project.filesPlanned || [];
     const completed = project.filesGenerated || [];
     const current = project.currentFile;
+    const isCompleted = project.status === "completed";
     const isFailed = project.status === "failed";
+
+    const [elapsed, setElapsed] = useState(() => {
+        if (project.generationDuration) return project.generationDuration;
+        const start = new Date(project.generationStartedAt || project.createdAt || Date.now()).getTime();
+        return Math.max(0, Math.floor((Date.now() - start) / 1000));
+    });
+
+    useEffect(() => {
+        if (project.generationDuration) {
+            setElapsed(project.generationDuration);
+            return;
+        }
+
+        if (isCompleted || isFailed) return;
+
+        const updateTimer = () => {
+            const now = Date.now();
+            const start = new Date(project.generationStartedAt || project.createdAt || now).getTime();
+            setElapsed(Math.max(0, Math.floor((now - start) / 1000)));
+        };
+
+        updateTimer();
+        const intervalId = setInterval(updateTimer, 1000);
+        return () => clearInterval(intervalId);
+    }, [project.status, project.generationDuration, project.generationStartedAt, project.createdAt, isCompleted, isFailed]);
 
     return (
         <div className="h-full w-full bg-zinc-50 flex flex-col items-center justify-center p-6 md:p-12 overflow-y-auto">
-            <div className="max-w-xl w-full bg-white border border-zinc-200 rounded-2xl p-6 md:p-8 relative overflow-hidden">
-                {/* Status Header */}
-                <div className="flex items-center gap-4 mb-6">
-                    <div>
-                        <h2 className="text-base font-medium text-zinc-800">
+            <div className="max-w-xl w-full bg-white border border-zinc-200 rounded-2xl p-6 md:p-8 relative overflow-hidden shadow-sm">
+                {/* Status Header & Live Timer */}
+                <div className="flex items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100">
+                    <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-zinc-900">
                             {isFailed
                                 ? "Generation Failed"
                                 : project.status === "pending"
@@ -22,6 +50,28 @@ export default function AgentProgressDashboard({ project }) {
                         <p className="text-xs text-zinc-500 mt-0.5">
                             {isFailed ? "An error occurred during build" : "Writing production-ready React codebase"}
                         </p>
+                    </div>
+
+                    {/* Live Stopwatch / Time Consumed Widget */}
+                    <div className="flex flex-col items-end shrink-0">
+                        <div
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-mono font-bold tracking-tight shadow-sm transition-all ${
+                                isFailed
+                                    ? "bg-red-50 border-red-200 text-red-700"
+                                    : isCompleted
+                                      ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                      : "bg-zinc-900 border-zinc-800 text-white"
+                            }`}
+                        >
+                            <TimerIcon
+                                size={14}
+                                className={!isFailed && !isCompleted ? "animate-spin text-amber-400" : "text-emerald-500"}
+                            />
+                            <span>{formatTimer(elapsed)}</span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 font-medium mt-1">
+                            {isCompleted ? `Built in ${formatDuration(elapsed)}` : isFailed ? "Generation stopped" : "Time elapsed"}
+                        </span>
                     </div>
                 </div>
 

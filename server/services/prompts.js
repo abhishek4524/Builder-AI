@@ -335,6 +335,7 @@ CRITICAL: Return ONLY the JSON object. Do NOT wrap it in markdown code fences. D
 Rules:
 - Do NOT include any other files
 - The code must be complete, visually stunning, and production-ready
+- WRITE CLEAN, MULTI-LINE CODE WITH REAL NEWLINES (\\n) AND PROPER INDENTATION. Every import, hook, statement, and JSX tag must be on its own line. NEVER collapse multiple statements or imports onto a single line without semicolons.
 - Import other project files using their exact paths (e.g. import Header from './components/Header')
 - The /styles.css file MUST include: Google Font @import, @keyframes float/fadeInUp/fadeIn, and .animate-* utility classes
 - Apply the full design system defined in the base instructions — premium typography, generous spacing, proper hover effects, and animations`;

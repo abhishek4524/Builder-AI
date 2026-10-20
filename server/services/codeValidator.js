@@ -1,5 +1,7 @@
+import { parse } from "@babel/parser";
+
 // Post-generation code validator and auto-fixer
-// Repairs common AI code generation errors before saving to DB using regex checks
+// Repairs common AI code generation errors before saving to DB using regex checks and Babel parsing
 
 // Void HTML elements that must be self-closed in JSX
 const VOID_ELEMENTS = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"];
@@ -22,6 +24,9 @@ export function validateAndFixCode(code, filePath, context) {
     code = code.replace(/^```(?:jsx?|javascript|css|html|tsx?|react)?\s*\n/, "");
     code = code.replace(/\n```\s*$/, "");
 
+    // 1a. Strip trailing stray quotes or backticks (common JSON string extraction artifact)
+    code = code.replace(/\s*["'`]+\s*$/, "\n");
+
     if (isCSS) {
         // CSS-specific fixes — minimal, just trim and return
         return { code: code.trim() + "\n", warnings };
@@ -32,6 +37,29 @@ export function validateAndFixCode(code, filePath, context) {
     }
 
     // --- JS/JSX-specific fixes ---
+
+    // 1b. Fix imports and exports concatenated on the same line without semicolons or newlines
+    if (/(['"])\s*(?=(?:import|export)\b)/.test(code)) {
+        code = code.replace(/(['"])\s*(?=(?:import|export)\b)/g, "$1;\n");
+        warnings.push(`${filePath}: Added missing newlines/semicolons between import/export statements`);
+    }
+
+    // Fix statements running together on a single line (missing semicolons before return/const/let/var)
+    code = code.replace(/([\]\)])\s*(?=(?:return|const|let|var)\b)/g, "$1;\n  ");
+    code = code.replace(/;\s*(?=(?:return|const|let|var|function)\b)/g, ";\n  ");
+    code = code.replace(/(\})\s*(?=(?:return|const|let|var|function|export)\b)/g, "$1\n\n");
+    code = code.replace(/(\{)\s*(?=(?:return|const|let|var)\b)/g, "$1\n  ");
+
+    // Remove unresolvable local CSS imports (e.g. import './Header.css' when only styles.css was planned)
+    code = code.replace(/import\s+['"]\.\/(\w+)\.css['"];?\s*/g, (match, name) => {
+        if (name === "styles") return match;
+        const exists = context?.allPlannedFiles?.some((f) => f.path.endsWith(`${name}.css`));
+        if (!exists) {
+            warnings.push(`${filePath}: Removed unresolvable CSS import './${name}.css'`);
+            return "";
+        }
+        return match;
+    });
 
     // 2. Fix `class=` → `className=` in JSX (but not inside strings or comments)
     // Match class= that appears inside JSX tags (after < and before >)
@@ -117,6 +145,51 @@ export function validateAndFixCode(code, filePath, context) {
         warnings.push(...fixResult.warnings);
     }
 
+    // 10. Syntax Validation & Self-Healing using Babel Parser
+    function checkBabel(source) {
+        try {
+            parse(source, { sourceType: "module", plugins: ["jsx"] });
+            return { ok: true };
+        } catch (err) {
+            return { ok: false, error: err };
+        }
+    }
+
+    let parseResult = checkBabel(code);
+    if (!parseResult.ok) {
+        // Attempt 1: Fix unclosed JSX conditional expression before closing tags (e.g. {isOpen && (...) </tag>)
+        const fixedBrace = code.replace(/(\))\s*(?=<\/[a-zA-Z]+>)/g, "$1}\n    ");
+        if (checkBabel(fixedBrace).ok) {
+            code = fixedBrace;
+            warnings.push(`${filePath}: Repaired unclosed JSX conditional brace before closing tag`);
+            parseResult = { ok: true };
+        }
+    }
+
+    if (!parseResult.ok) {
+        // Attempt 2: Fix unclosed curly braces at the end of file (e.g. truncated function body)
+        const openBraces = (code.match(/\{/g) || []).length;
+        const closeBraces = (code.match(/\}/g) || []).length;
+        if (openBraces > closeBraces) {
+            let candidate = code;
+            for (let i = 0; i < openBraces - closeBraces; i++) {
+                candidate += "\n}";
+            }
+            if (checkBabel(candidate).ok) {
+                code = candidate;
+                warnings.push(`${filePath}: Added ${openBraces - closeBraces} missing closing brace(s)`);
+                parseResult = { ok: true };
+            }
+        }
+    }
+
+    if (!parseResult.ok) {
+        // If the code still has fatal syntax errors after all repair heuristics,
+        // throw an error so the AI generation retry loop will regenerate this file cleanly!
+        console.warn(`[Validator] Fatal syntax error in ${filePath}: ${parseResult.error.message}`);
+        throw new Error(`Syntax error in ${filePath}: ${parseResult.error.message}`);
+    }
+
     return { code: code.trim() + "\n", warnings };
 }
 
@@ -125,8 +198,12 @@ export function validateRevisionContent(content, filePath, op) {
     if (op === "delete") return { content, warnings: [] };
 
     if (op === "create") {
-        const result = validateAndFixCode(content, filePath);
-        return { content: result.code, warnings: result.warnings };
+        try {
+            const result = validateAndFixCode(content, filePath);
+            return { content: result.code, warnings: result.warnings };
+        } catch (err) {
+            return { content, warnings: [`${filePath}: Syntax validation warning - ${err.message}`] };
+        }
     }
 
     // For update ops (search/replace content), only apply safe fixes

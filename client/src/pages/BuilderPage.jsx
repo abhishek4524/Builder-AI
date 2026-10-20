@@ -84,6 +84,10 @@ const BuilderPage = () => {
       <BuilderHeader
         projectName={activeProjects.name}
         version={activeProjects.version}
+        status={activeProjects.status}
+        generationDuration={activeProjects.generationDuration}
+        generationStartedAt={activeProjects.generationStartedAt}
+        createdAt={activeProjects.createdAt}
         showCode={showCode}
         publishing={publishing}
         onToggleShowCode={() => setShowCode(!showCode)}
@@ -137,7 +141,7 @@ const BuilderPage = () => {
         <div className="flex-1 overflow-hidden">
           {activeProjects.status === "pending" ||
           activeProjects.status === "generating" ||
-          activeProjects === "failed" ? (
+          activeProjects.status === "failed" ? (
             <AgentProgressDashboard project={activeProjects} />
           ) : (
             <PreviewPanel

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { data, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import api from '../api/api'
 import Loading from '../components/Loading'
 import { AlertCircleIcon } from 'lucide-react'

@@ -1,4 +1,3 @@
-import { file } from 'jszip';
 import React, { useMemo, useState } from 'react'
 import { detectDependencies } from '../utils/sandpackUtils';
 import SandpackErrorMonitor from './SandpackErrorMonitor';
