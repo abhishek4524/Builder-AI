@@ -15,7 +15,7 @@ const UsageLogSchema = new Schema(
         },
         action: {
             type: String,
-            enum: ["generate", "revise"],
+            enum: ["generate", "revise", "edit"],
             required: true,
         },
         model: {

@@ -14,6 +14,7 @@ import { applyOperations } from "./services/diff.js";
 import { buildManifest } from "./controllers/chatController.js";
 import { refundCredits } from "./services/credits.js";
 import { publishEvent } from "./services/events.js";
+import { publishUserActivityEvent } from "./services/activity.js";
 
 function hashContent(content) {
     return crypto.createHash("md5").update(content).digest("hex").slice(0, 12);
@@ -238,6 +239,7 @@ async function processGenerationJob(job) {
                     unitsCharged: unitsReserved,
                     status: "success",
                 });
+                await publishUserActivityEvent(userId, { type: "generate", projectId });
             }
 
             console.log(`[Worker] Successfully completed generate job for ${projectId}`);
@@ -302,6 +304,7 @@ async function processGenerationJob(job) {
                     unitsCharged: unitsReserved,
                     status: "success",
                 });
+                await publishUserActivityEvent(userId, { type: "revise", projectId });
             }
 
             console.log(`[Worker] Successfully completed revise job for ${projectId}`);

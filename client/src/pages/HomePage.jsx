@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { useTheme } from "../context/ThemeContext";
 import PromptInput from "../components/PromptInput";
@@ -15,6 +15,7 @@ const HomePage = () => {
   const isDark = resolvedTheme === "dark";
 
   const {
+    user,
     projects,
     loadingProjects,
     generatingProject,
@@ -25,6 +26,28 @@ const HomePage = () => {
     openOutOfCreditsModal,
     plan,
   } = useAppContext();
+
+  // Extract first name for personalized greeting
+  const firstName = user?.name ? user.name.trim().split(/\s+/)[0] : "there";
+  const formattedFirstName = firstName.charAt(0).toUpperCase() + firstName.slice(1);
+
+  // Random personalized greeting for logged in users
+  const [randomGreeting, setRandomGreeting] = useState("");
+
+  useEffect(() => {
+    if (user) {
+      const greetings = [
+        `What's the vision, ${formattedFirstName}?`,
+        `What are we building today, ${formattedFirstName}?`,
+        `Ready to create something amazing, ${formattedFirstName}?`,
+        `What would you like to build, ${formattedFirstName}?`,
+        `Where shall we start, ${formattedFirstName}?`,
+        `Let's build something incredible, ${formattedFirstName}.`,
+      ];
+      const randomIndex = Math.floor(Math.random() * greetings.length);
+      setRandomGreeting(greetings[randomIndex]);
+    }
+  }, [user, formattedFirstName]);
 
   useEffect(() => {
     loadProjects();
@@ -44,35 +67,37 @@ const HomePage = () => {
           <img src="/logo.png" alt="logo" className={`size-6 ${!isDark ? "invert" : ""}`} />
         </div>
         <div className={`flex items-center gap-3 text-sm font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
-          {/* Credit balance badge */}
-          <button
-            onClick={() => openOutOfCreditsModal({ balance: credits, required: 2 })}
-            title={`Available balance: ${credits} credits. Click to upgrade.`}
-            className={`inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-mono font-medium border transition-all cursor-pointer ${
-              credits === 0
-                ? "bg-red-500/20 border-red-500/40 text-red-200 hover:bg-red-500/30"
-                : credits <= 2
-                ? "bg-amber-500/20 border-amber-500/40 text-amber-200 hover:bg-amber-500/30"
-                : isDark
-                ? "bg-white/10 border-white/20 text-white/90 hover:bg-white/15 backdrop-blur-md"
-                : "bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-50 shadow-xs"
-            }`}
-          >
-            <ZapIcon
-              size={12}
-              className={
+          {/* Credit balance badge - only when user is logged in */}
+          {user && (
+            <button
+              onClick={() => openOutOfCreditsModal({ balance: credits, required: 2 })}
+              title={`Available balance: ${credits} credits. Click to upgrade.`}
+              className={`inline-flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-mono font-medium border transition-all cursor-pointer ${
                 credits === 0
-                  ? "fill-red-400 text-red-400"
-                  : "fill-amber-400 text-amber-400"
-              }
-            />
-            <span>{credits.toFixed(credits % 1 === 0 ? 0 : 1)} credits</span>
-            {plan === "pro" && (
-              <span className="ml-1 px-1.5 py-0.2 bg-amber-400 text-zinc-950 font-bold text-[9px] rounded-full uppercase tracking-wider">
-                PRO
-              </span>
-            )}
-          </button>
+                  ? "bg-red-500/20 border-red-500/40 text-red-200 hover:bg-red-500/30"
+                  : credits <= 2
+                  ? "bg-amber-500/20 border-amber-500/40 text-amber-200 hover:bg-amber-500/30"
+                  : isDark
+                  ? "bg-white/10 border-white/20 text-white/90 hover:bg-white/15 backdrop-blur-md"
+                  : "bg-white border-zinc-200 text-zinc-800 hover:bg-zinc-50 shadow-xs"
+              }`}
+            >
+              <ZapIcon
+                size={12}
+                className={
+                  credits === 0
+                    ? "fill-red-400 text-red-400"
+                    : "fill-amber-400 text-amber-400"
+                }
+              />
+              <span>{credits.toFixed(credits % 1 === 0 ? 0 : 1)} credits</span>
+              {plan === "pro" && (
+                <span className="ml-1 px-1.5 py-0.2 bg-amber-400 text-zinc-950 font-bold text-[9px] rounded-full uppercase tracking-wider">
+                  PRO
+                </span>
+              )}
+            </button>
+          )}
 
           <button
             onClick={() => navigate("/pricing")}
@@ -85,42 +110,62 @@ const HomePage = () => {
 
           <ThemeToggle />
 
-          <UserDropdown variant={isDark ? "dark" : "light"} />
+          {!user ? (
+            <button
+              onClick={() => navigate("/login")}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                isDark
+                  ? "bg-white text-zinc-950 hover:bg-zinc-200 shadow-xs"
+                  : "bg-zinc-900 text-white hover:bg-zinc-800 shadow-xs"
+              }`}
+            >
+              Sign In
+            </button>
+          ) : (
+            <UserDropdown variant={isDark ? "dark" : "light"} />
+          )}
         </div>
       </nav>
 
       {/* Hero */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 pb-20 mt-8 xl:mt-28">
         <div className="w-full max-w-2xl flex flex-col items-center">
-          {/* Promo Badge */}
-          <div
-            className={`flex items-center gap-2 p-1.5 pr-3 rounded-full border text-[13px] ${
-              isDark
-                ? "bg-white/10 backdrop-blur-md border-white/20 text-white/90"
-                : "bg-white border-zinc-200 text-zinc-800 shadow-xs"
-            }`}
-          >
-            <span className="px-3 py-1 text-[11px] bg-red-600 text-white rounded-full font-medium tracking-wider">
-              PROMO
-            </span>
-            <span>Create your first project for free.</span>
-          </div>
+          {/* Promo Badge - only shown when logged out */}
+          {!user && (
+            <div
+              className={`flex items-center gap-2 p-1.5 pr-3 rounded-full border text-[13px] ${
+                isDark
+                  ? "bg-white/10 backdrop-blur-md border-white/20 text-white/90"
+                  : "bg-white border-zinc-200 text-zinc-800 shadow-xs"
+              }`}
+            >
+              <span className="px-3 py-1 text-[11px] bg-red-600 text-white rounded-full font-medium tracking-wider">
+                PROMO
+              </span>
+              <span>Create your first project for free.</span>
+            </div>
+          )}
 
-          {/* Title */}
+          {/* Title: dynamic and personalized when logged in */}
           <h1
-            className={`text-center text-4xl md:text-6xl font-medium mt-4 max-w-2xl ${
+            className={`text-center text-4xl md:text-6xl font-medium ${
+              !user ? "mt-4" : "mt-2"
+            } max-w-2xl ${
               isDark ? "text-white" : "text-zinc-950"
             }`}
           >
-            Let's build your app together
+            {user
+              ? randomGreeting || `What's the vision, ${formattedFirstName}?`
+              : "Let's build your app together"}
           </h1>
           <p
             className={`text-center text-sm md:text-base max-w-xl mt-4 leading-relaxed ${
               isDark ? "text-white/65" : "text-zinc-600"
             }`}
           >
-            Describe your idea and watch AI design, structure and launch your
-            website instantly. No coding required.
+            {user
+              ? "Describe your next project or feature and watch AI design, structure and launch your website instantly."
+              : "Describe your idea and watch AI design, structure and launch your website instantly. No coding required."}
           </p>
 
           {/* Prompt input with glassmorphic variant */}

@@ -6,6 +6,8 @@ import { reserveCredits, refundCredits, InsufficientCreditsError } from "../serv
 import { addGenerationJob, generationQueue } from "../queues/generationQueue.js";
 import { publishEvent, getProjectProgressSnapshot } from "../services/events.js";
 import { createRedisSubscriber, redisClient } from "../config/redis.js";
+import { UsageLog } from "../models/UsageLog.js";
+import { publishUserActivityEvent } from "../services/activity.js";
 
 function hashContent(content) {
     return crypto.createHash("md5").update(content).digest("hex").slice(0, 12);
@@ -421,6 +423,24 @@ export async function updateProjectFiles(req, res) {
     }
     project.files = newFiles;
     await project.save();
+
+    // Log manual edit activity and broadcast live update
+    try {
+        await UsageLog.create({
+            userId: req.user.userId,
+            projectId: project._id,
+            action: "edit",
+            model: "manual",
+            unitsCharged: 0,
+            status: "success",
+        });
+        await publishUserActivityEvent(req.user.userId, {
+            type: "edit",
+            projectId: project._id,
+        });
+    } catch (logErr) {
+        console.warn("[ProjectController Activity Log Error]", logErr.message);
+    }
 
     const filesObj = {};
     for (const [path, entry] of Object.entries(project.files || {})) {

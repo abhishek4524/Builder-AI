@@ -14,6 +14,8 @@ import {
   markTokenUsed,
 } from "../services/authTokens.js";
 import { OAuth2Client } from "google-auth-library";
+import { getUserActivityData } from "../services/activity.js";
+import { createRedisSubscriber } from "../config/redis.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -392,4 +394,85 @@ export async function restoreAccount(req, res) {
       balance: unitsToCredits(userObj.creditUnits ?? 0),
     },
   });
+}
+
+/**
+ * GET /api/account/activity
+ * Returns 52-week activity heatmap data and statistics.
+ */
+export async function getActivity(req, res) {
+  try {
+    const data = await getUserActivityData(req.user.userId);
+    return res.json(data);
+  } catch (err) {
+    console.error("[getActivity Error]", err);
+    return res.status(500).json({ error: "Failed to load activity details" });
+  }
+}
+
+/**
+ * GET /api/account/activity/stream
+ * Real-time SSE stream for live activity updates.
+ */
+export async function streamActivity(req, res) {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const userId = req.user.userId.toString();
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  if (typeof res.flushHeaders === "function") {
+    res.flushHeaders();
+  }
+
+  // Send initial snapshot immediately
+  try {
+    const initialData = await getUserActivityData(userId);
+    res.write(`event: snapshot\ndata: ${JSON.stringify(initialData)}\n\n`);
+  } catch (err) {
+    console.error("[Activity SSE Snapshot Error]", err.message);
+  }
+
+  const subscriber = createRedisSubscriber();
+  const channel = `user:${userId}:activity`;
+  let isClosed = false;
+
+  try {
+    await subscriber.subscribe(channel);
+  } catch (subErr) {
+    console.warn("[Activity SSE Subscribe Warning]", subErr.message);
+  }
+
+  subscriber.on("message", async (chan) => {
+    if (chan !== channel || isClosed) return;
+    try {
+      const updatedData = await getUserActivityData(userId);
+      res.write(`event: activity_update\ndata: ${JSON.stringify(updatedData)}\n\n`);
+    } catch (e) {
+      console.error("[Activity SSE Update Error]", e.message);
+    }
+  });
+
+  const heartbeatTimer = setInterval(() => {
+    if (!isClosed) {
+      res.write(": ping\n\n");
+    }
+  }, 20000);
+
+  const cleanup = () => {
+    if (isClosed) return;
+    isClosed = true;
+    clearInterval(heartbeatTimer);
+    subscriber.unsubscribe(channel).catch(() => {});
+    subscriber.quit().catch(() => {});
+    res.end();
+  };
+
+  req.on("close", cleanup);
+  req.on("error", cleanup);
 }

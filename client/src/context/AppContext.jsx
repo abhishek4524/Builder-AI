@@ -245,6 +245,11 @@ export function AppContextProvider({ children }) {
                 const { data } = await api.post('/api/projects', { prompt });
                 toast.success('AI Agent is planning structure...');
                 refreshCredits();
+                try {
+                    const bc = new BroadcastChannel("i1-activity-sync");
+                    bc.postMessage({ type: "generate", timestamp: Date.now() });
+                    bc.close();
+                } catch {}
                 navigate(`/builder/${data._id}`);
             } catch (error) {
                 console.error('Failed to generate project:', error);
@@ -283,6 +288,11 @@ export function AppContextProvider({ children }) {
                 const { data } = await api.post(`/api/projects/${activeProjects._id}/chat`, { prompt });
                 setActiveProjects(data);
                 refreshCredits();
+                try {
+                    const bc = new BroadcastChannel("i1-activity-sync");
+                    bc.postMessage({ type: "chat_revision", timestamp: Date.now() });
+                    bc.close();
+                } catch {}
 
                 if (data.errors && data.errors.length > 0) {
                     toast.error(`${data.errors.length} revision patch(es) failed`);
@@ -306,6 +316,11 @@ export function AppContextProvider({ children }) {
             debounce(async (files, id) => {
                 try {
                     await api.put(`/api/projects/${id}/files`, { files });
+                    try {
+                        const bc = new BroadcastChannel("i1-activity-sync");
+                        bc.postMessage({ type: "edit", timestamp: Date.now() });
+                        bc.close();
+                    } catch {}
                 } catch (error) {
                     console.error('Failed to auto-save files:', error);
                     toast.error('Failed to save code modifications');

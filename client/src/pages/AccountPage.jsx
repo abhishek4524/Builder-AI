@@ -22,6 +22,7 @@ import {
   PaletteIcon,
 } from "lucide-react";
 import ThemeToggle from "../components/ThemeToggle";
+import ActivityHeatmap from "../components/ActivityHeatmap";
 
 export default function AccountPage() {
   const { tab } = useParams();
@@ -361,7 +362,7 @@ export default function AccountPage() {
 
         {/* Tab 1: Profile */}
         {!loadingSummary && activeTab === "profile" && (
-          <div className="max-w-2xl space-y-6 animate-in fade-in duration-200">
+          <div className="max-w-4xl space-y-6 animate-in fade-in duration-200">
             {/* Header info card */}
             <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 flex items-center gap-4 shadow-xs">
               {summary?.user?.avatar ? (
@@ -384,8 +385,13 @@ export default function AccountPage() {
               </div>
             </div>
 
+            {/* Activity Heatmap Card */}
+            <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 shadow-xs">
+              <ActivityHeatmap appName="i1" />
+            </div>
+
             {/* Appearance & Theme Setting Card */}
-            <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 space-y-3.5 shadow-xs">
+            <div className="max-w-2xl p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 space-y-3.5 shadow-xs">
               <div className="flex items-center gap-2">
                 <PaletteIcon size={16} className="text-amber-500" />
                 <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Appearance & Theme</h3>
@@ -399,7 +405,7 @@ export default function AccountPage() {
             </div>
 
             {/* Profile Form */}
-            <form onSubmit={handleUpdateProfile} className="p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 space-y-5 shadow-xs">
+            <form onSubmit={handleUpdateProfile} className="max-w-2xl p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 space-y-5 shadow-xs">
               <h3 className="font-semibold text-zinc-900 dark:text-white uppercase tracking-wider text-[11px]">Personal Details</h3>
 
               <div>
@@ -670,6 +676,11 @@ export default function AccountPage() {
                   <span className="text-xs text-emerald-600 dark:text-emerald-400">({summary?.projects?.published || 0} published)</span>
                 </div>
               </div>
+            </div>
+
+            {/* Live Activity Heatmap */}
+            <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/80 shadow-xs">
+              <ActivityHeatmap appName="i1" />
             </div>
 
             {/* 30-Day Aggregates if available */}
