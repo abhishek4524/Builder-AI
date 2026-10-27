@@ -8,10 +8,10 @@ import {
 } from "@codesandbox/sandpack-react";
 import { detectDependencies } from "../utils/sandpackUtils";
 import { useAppContext } from "../context/AppContext";
-import { HatGlassesIcon } from "lucide-react";
+import { useTheme } from "../context/ThemeContext";
 import SandpackErrorMonitor from "./SandpackErrorMonitor";
 
-// Watches for file edits inside Sandpace editor and saves changes to DB & live state
+// Watches for file edits inside Sandpack editor and saves changes to DB & live state
 function SanpackFileWatcher({ onLiveFilesChange }) {
   const { sandpack } = useSandpack();
   const { files } = sandpack;
@@ -49,6 +49,7 @@ function SanpackFileWatcher({ onLiveFilesChange }) {
 }
 
 const PreviewPanel = ({ project, activeFile, showCode }) => {
+  const { resolvedTheme } = useTheme();
   const [showErrorOverlay, setShowErrorOverlay] = useState(true);
   // Keep local state of files that updates as user types
   const [liveFiles, setLiveFiles] = useState(project.files);
@@ -75,7 +76,7 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
     });
   };
 
-  //Convert liveFiles ot Sandpack format
+  //Convert liveFiles to Sandpack format
   const sandpackFiles = useMemo(() => {
     const spFiles = {};
     for (const [path, content] of Object.entries(liveFiles)) {
@@ -94,10 +95,47 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
     return detectDependencies(liveFiles);
   }, [liveFiles]);
 
+  const sandpackTheme = useMemo(() => {
+    const isDark = resolvedTheme === "dark";
+    return {
+      colors: isDark
+        ? {
+            surface1: "#18181b",
+            surface2: "#27272a",
+            surface3: "#3f3f46",
+            clickable: "#a1a1aa",
+            base: "#f4f4f5",
+            disabled: "#71717a",
+            hover: "#ffffff",
+            accent: "#60a5fa",
+            error: "#f87171",
+            errorSurface: "#450a0a",
+          }
+        : {
+            surface1: "#ffffff",
+            surface2: "#f4f4f5",
+            surface3: "#e4e4e7",
+            clickable: "#71717a",
+            base: "#09090b",
+            disabled: "#a1a1aa",
+            hover: "#18181b",
+            accent: "#18181b",
+            error: "#ef4444",
+            errorSurface: "#fef2f2",
+          },
+      font: {
+        body: "'Urbanist', system-ui, -apple-system, sans-serif",
+        mono: "'Geist Mono', ui-monospace, monospace",
+        size: "13px",
+        lineHeight: "1.6",
+      },
+    };
+  }, [resolvedTheme]);
+
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full bg-white dark:bg-zinc-950 transition-colors">
       <SandpackProvider
-        key={project._id}
+        key={`${project._id}-${resolvedTheme}`}
         template="react"
         files={sandpackFiles}
         customSetup={{ dependencies }}
@@ -113,26 +151,7 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
           },
           logLevel: 0,
         }}
-        theme={{
-          colors: {
-            surface1: "#ffffff",
-            surface2: "#f4f4f5",
-            surface3: "#e4e4e7",
-            clickable: "#71717a",
-            base: "#09090b",
-            disabled: "#a1a1aa",
-            hover: "#18181b",
-            accent: "#18181b",
-            error: "#ef4444",
-            errorSurface: "#fef2f2",
-          },
-          font: {
-            body: "'Urbanist', system-ui, -apple-system, sans-serif",
-            mono: "'Geist Mono', ui-monospace, monospace",
-            size: "13px",
-            lineHeight: "1.6",
-          },
-        }}
+        theme={sandpackTheme}
       >
         <SanpackFileWatcher onLiveFilesChange={handleLiveFileChange} />
         <SandpackErrorMonitor onErrorChange={setShowErrorOverlay} />

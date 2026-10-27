@@ -1,10 +1,11 @@
 import { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 
 const AppContext = createContext(undefined);
-import api from '../api/api.js';
+import api, { setOnOutOfCreditsHandler } from '../api/api.js';
 import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import debounce from 'lodash.debounce';
+import OutOfCreditsModal from '../components/OutOfCreditsModal.jsx';
 
 export function AppContextProvider({ children }) {
     const navigate = useNavigate();
@@ -12,6 +13,10 @@ export function AppContextProvider({ children }) {
     // Auth States
     const [user, setUser] = useState(null);
     const [loadingUser, setLoadingUser] = useState(true);
+
+    // Credit Modal State
+    const [isOutOfCreditsOpen, setIsOutOfCreditsOpen] = useState(false);
+    const [outOfCreditsDetails, setOutOfCreditsDetails] = useState(null);
 
     // States
     const [projects, setProjects] = useState([]);
@@ -22,6 +27,21 @@ export function AppContextProvider({ children }) {
     const [generatingProject, setGeneratingProject] = useState(false);
     const [activeFile, setActiveFile] = useState('/App.js');
     const [showCode, setShowCode] = useState(false);
+
+    // Register 402 out-of-credits handler globally
+    useEffect(() => {
+        setOnOutOfCreditsHandler((details) => {
+            setOutOfCreditsDetails(details);
+            setIsOutOfCreditsOpen(true);
+        });
+
+        const handleCustomEvent = (e) => {
+            setOutOfCreditsDetails(e.detail);
+            setIsOutOfCreditsOpen(true);
+        };
+        window.addEventListener('out_of_credits', handleCustomEvent);
+        return () => window.removeEventListener('out_of_credits', handleCustomEvent);
+    }, []);
 
     const checkSession = useCallback(async () => {
         try {
@@ -34,9 +54,30 @@ export function AppContextProvider({ children }) {
         }
     }, []);
 
-    useEffect(() => {
-        checkSession()
+    const refreshCredits = useCallback(async () => {
+        try {
+            const { data } = await api.get('/api/credits');
+            setUser((prev) => (prev ? { ...prev, creditUnits: data.units, balance: data.balance, plan: data.plan } : prev));
+            return data;
+        } catch (error) {
+            // Ignore if unauthenticated
+        }
     }, []);
+
+    const resendVerification = useCallback(async () => {
+        try {
+            await api.post('/api/auth/resend-verification');
+            toast.success('Verification email sent! Check your inbox.');
+        } catch (error) {
+            const msg = error?.response?.data?.error || 'Failed to resend. Please try again.';
+            toast.error(msg);
+            throw error;
+        }
+    }, []);
+
+    useEffect(() => {
+        checkSession();
+    }, [checkSession]);
 
     const login = async (email, password) => {
         try {
@@ -46,9 +87,15 @@ export function AppContextProvider({ children }) {
             navigate('/');
         } catch (error) {
             console.error('Login failed:', error);
-            const errMsg = error?.response?.data?.error || 'Invalid email or password';
-            toast.error(errMsg);
-            throw new Error(errMsg);
+            const data = error?.response?.data;
+            const errMsg = data?.error || 'Invalid email or password';
+            if (data?.code !== "ACCOUNT_PENDING_DELETION") {
+                toast.error(errMsg);
+            }
+            const err = new Error(errMsg);
+            err.code = data?.code;
+            err.data = data;
+            throw err;
         }
     };
 
@@ -65,6 +112,40 @@ export function AppContextProvider({ children }) {
             throw new Error(errMsg);
         }
     };
+
+    const loginWithGoogle = async (credential) => {
+        try {
+            const { data } = await api.post('/api/auth/google', { credential });
+            setUser(data.user);
+            toast.success('Signed in with Google!');
+            navigate('/');
+        } catch (error) {
+            console.error('Google sign-in failed:', error);
+            const data = error?.response?.data;
+            const errMsg = data?.error || 'Google sign-in failed';
+            if (data?.code !== "ACCOUNT_PENDING_DELETION") {
+                toast.error(errMsg);
+            }
+            const err = new Error(errMsg);
+            err.code = data?.code;
+            err.data = data;
+            throw err;
+        }
+    };
+
+    const restoreAccount = useCallback(async (credentials) => {
+        try {
+            const { data } = await api.post('/api/account/restore', credentials);
+            setUser(data.user);
+            toast.success(data.message || 'Account restored successfully!');
+            navigate('/');
+            return data;
+        } catch (error) {
+            const msg = error?.response?.data?.error || 'Failed to restore account';
+            toast.error(msg);
+            throw error;
+        }
+    }, [navigate]);
 
     const logout = async () => {
         try {
@@ -131,20 +212,29 @@ export function AppContextProvider({ children }) {
         if (!activeProjects?._id || !user) return;
 
         const isOngoing =
+            activeProjects.status === 'queued' ||
             activeProjects.status === 'generating' ||
             activeProjects.status === 'pending' ||
             activeProjects.status === 'revising';
 
-        if (isOngoing) {
-            setChatLoading(true);
-            const interval = setInterval(() => {
-                loadProject(activeProjects._id, true);
-            }, 2000);
-            return () => clearInterval(interval);
-        }
+        setChatLoading(isOngoing);
+    }, [activeProjects?._id, activeProjects?.status, user]);
 
-        setChatLoading(false);
-    }, [activeProjects?._id, activeProjects?.status, user, loadProject]);
+    const handleCancel = useCallback(
+        async (id) => {
+            if (!user || !id) return;
+            try {
+                await api.post(`/api/projects/${id}/cancel`);
+                toast.success("Generation cancelled. Credits refunded.");
+                await loadProject(id, true);
+                await refreshCredits();
+            } catch (err) {
+                console.error("Cancel failed:", err);
+                toast.error(err?.response?.data?.error || "Failed to cancel generation");
+            }
+        },
+        [user, loadProject, refreshCredits]
+    );
 
     const handleGenerate = useCallback(
         async (prompt) => {
@@ -154,15 +244,18 @@ export function AppContextProvider({ children }) {
             try {
                 const { data } = await api.post('/api/projects', { prompt });
                 toast.success('AI Agent is planning structure...');
+                refreshCredits();
                 navigate(`/builder/${data._id}`);
             } catch (error) {
                 console.error('Failed to generate project:', error);
-                toast.error(error?.response?.data?.error || 'Failed to generate project');
+                if (error?.response?.status !== 402) {
+                    toast.error(error?.response?.data?.error || 'Failed to generate project');
+                }
             } finally {
                 setGeneratingProject(false);
             }
         },
-        [navigate, user]
+        [navigate, user, refreshCredits]
     );
 
     const handleDelete = useCallback(
@@ -189,6 +282,7 @@ export function AppContextProvider({ children }) {
             try {
                 const { data } = await api.post(`/api/projects/${activeProjects._id}/chat`, { prompt });
                 setActiveProjects(data);
+                refreshCredits();
 
                 if (data.errors && data.errors.length > 0) {
                     toast.error(`${data.errors.length} revision patch(es) failed`);
@@ -197,12 +291,14 @@ export function AppContextProvider({ children }) {
                 }
             } catch (error) {
                 console.error('Revision request failed:', error);
-                toast.error(error?.response?.data?.error || 'Revision request failed');
+                if (error?.response?.status !== 402) {
+                    toast.error(error?.response?.data?.error || 'Revision request failed');
+                }
             } finally {
                 setChatLoading(false);
             }
         },
-        [activeProjects, user]
+        [activeProjects, user, refreshCredits]
     );
 
     const debouncedSave = useMemo(
@@ -233,13 +329,20 @@ export function AppContextProvider({ children }) {
         [activeProjects, user, debouncedSave]
     );
 
+    const credits = user?.balance ?? 0;
+    const creditUnits = user?.creditUnits ?? 0;
+    const plan = user?.plan || 'free';
+
     return (
         <AppContext.Provider
             value={{
                 user,
                 loadingUser,
                 login,
+                loginWithGoogle,
                 register,
+                resendVerification,
+                restoreAccount,
                 projects,
                 loadingProjects,
                 activeProjects,
@@ -254,12 +357,27 @@ export function AppContextProvider({ children }) {
                 loadProject,
                 handleGenerate,
                 handleDelete,
+                handleCancel,
                 logout,
                 handleChat,
                 updateProjectFiles,
+                setActiveProjects,
+                credits,
+                creditUnits,
+                plan,
+                refreshCredits,
+                openOutOfCreditsModal: (details) => {
+                    setOutOfCreditsDetails(details);
+                    setIsOutOfCreditsOpen(true);
+                },
             }}
         >
             {children}
+            <OutOfCreditsModal
+                isOpen={isOutOfCreditsOpen}
+                onClose={() => setIsOutOfCreditsOpen(false)}
+                details={outOfCreditsDetails}
+            />
         </AppContext.Provider>
     );
 }

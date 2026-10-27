@@ -1,17 +1,19 @@
 import { Project } from "../models/Project.js";
-import { reviseProject } from "../services/ai.js";
-import { applyOperations } from "../services/diff.js";
+import { CREDITS_CONFIG } from "../config/credits.js";
+import { reserveCredits, refundCredits, InsufficientCreditsError } from "../services/credits.js";
+import { addRevisionJob } from "../queues/generationQueue.js";
+import { publishEvent } from "../services/events.js";
 
 export function buildManifest(files) {
     const manifest = [];
     for (const [path, entry] of Object.entries(files || {})) {
-        manifest.push({ path, hash: entry.hash, size: entry.content.length });
+        manifest.push({ path, hash: entry.hash, size: entry.content?.length || 0 });
     }
     return manifest;
 }
 
 // POST /api/projects/:id/chat
-// Send a revision prompt and return updated project.
+// Enqueue a revision prompt and return immediately.
 export async function chat(req, res) {
     const { prompt } = req.body;
 
@@ -31,69 +33,78 @@ export async function chat(req, res) {
         return;
     }
 
-    project.status = "revising";
+    // Guard: Block if already generating or revising
+    if (["queued", "pending", "generating", "revising"].includes(project.status)) {
+        return res.status(409).json({
+            code: "GENERATION_IN_PROGRESS",
+            message: "A website generation or revision is already in progress. Please wait.",
+        });
+    }
+
+    // 1. Reserve credits atomically before enqueuing revision
+    const unitsToCharge = CREDITS_CONFIG.COST_REVISE_UNITS;
+    try {
+        await reserveCredits(req.user.userId, unitsToCharge, {
+            projectId: project._id,
+            reason: "Revision chat request",
+        });
+    } catch (err) {
+        if (err.code === "INSUFFICIENT_CREDITS" || err instanceof InsufficientCreditsError) {
+            return res.status(402).json({
+                code: "INSUFFICIENT_CREDITS",
+                balance: err.balance,
+                required: err.required,
+            });
+        }
+        throw err;
+    }
+
+    project.status = "queued";
+    project.creditsRefunded = false;
     project.messages.push({ role: "user", content: prompt, timestamp: new Date() });
     await project.save();
 
+    await publishEvent(project._id.toString(), {
+        type: "queued",
+        data: { message: "Revision request queued..." },
+    });
+
+    // 2. Enqueue in BullMQ
     try {
-        const manifest = buildManifest(project.files);
-        const relevantFiles = {};
-        for (const [path, entry] of Object.entries(project.files || {})) {
-            relevantFiles[path] = entry.content;
-        }
-
-        const recentMessages = project.messages.slice(-4).map((m) => ({
-            role: m.role,
-            content: m.content,
-        }));
-
-        console.log(
-            `[AI] Revising project ${project._id}: "${prompt.slice(0, 80)}..."` +
-            `(${manifest.length} files, manifest ~${JSON.stringify(manifest).length} chars)`
-        );
-
-        const result = await reviseProject(prompt, manifest, relevantFiles, recentMessages);
-        console.log(`[AI] Got ${result.operations.length} operations: ${result.description}`);
-
-        const { files: updatedFiles, applied, errors } = applyOperations(project.files, result.operations);
-
-        if (errors.length > 0) {
-            console.warn(`[Diff] Errors applying operations:`, errors);
-        }
-
-        project.files = updatedFiles;
-        project.markModified("files");
-        project.version += 1;
-        project.status = "completed";
-        project.messages.push({
-            role: "assistant",
-            content: result.description + (errors.length > 0 ? `\n\nSome operations failed: ${errors.join(", ")}` : ""),
-            timestamp: new Date(),
-        });
-
-        await project.save();
-
-        const filesObj = {};
-        for (const [path, entry] of Object.entries(project.files || {})) {
-            filesObj[path] = entry.content;
-        }
-
-        res.json({
-            _id: project._id,
-            name: project.name,
-            description: project.description,
-            files: filesObj,
-            messages: project.messages,
+        await addRevisionJob({
+            projectId: project._id.toString(),
+            prompt,
+            userId: req.user.userId,
+            unitsReserved: unitsToCharge,
             version: project.version,
-            status: project.status,
-            applied,
-            errors,
-            aiDescription: result.description,
         });
-    } catch (err) {
-        console.error(`[AI Revision Error] ${err.message}`);
+    } catch (queueErr) {
+        console.error(`[Queue Error] Failed to enqueue revision for project ${project._id}:`, queueErr);
         project.status = "completed";
         await project.save();
-        res.status(500).json({ error: err.message || "Failed to process revision request" });
+
+        await refundCredits(req.user.userId, unitsToCharge, {
+            projectId: project._id,
+            reason: "Queue unavailable; revision aborted",
+        });
+
+        return res.status(503).json({
+            error: "Revision service temporarily unavailable. Credits have been refunded.",
+        });
     }
+
+    const filesObj = {};
+    for (const [path, entry] of Object.entries(project.files || {})) {
+        filesObj[path] = entry.content;
+    }
+
+    res.json({
+        _id: project._id,
+        name: project.name,
+        description: project.description,
+        files: filesObj,
+        messages: project.messages,
+        version: project.version,
+        status: project.status,
+    });
 }

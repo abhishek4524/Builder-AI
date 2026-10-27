@@ -1,13 +1,21 @@
 import crypto from "crypto";
 import { Project } from "../models/Project.js";
-import { generateProject } from "../services/ai.js";
+import { User } from "../models/User.js";
+import { CREDITS_CONFIG } from "../config/credits.js";
+import { reserveCredits, refundCredits, InsufficientCreditsError } from "../services/credits.js";
+import { addGenerationJob, generationQueue } from "../queues/generationQueue.js";
+import { publishEvent, getProjectProgressSnapshot } from "../services/events.js";
+import { createRedisSubscriber, redisClient } from "../config/redis.js";
 
 function hashContent(content) {
     return crypto.createHash("md5").update(content).digest("hex").slice(0, 12);
 }
 
+// Track active SSE connections per user to prevent connection exhaustion
+const userSSEConnections = new Map();
+
 // POST /api/projects
-// Create a new project from an AI prompt.
+// Create and queue a new project generation job.
 export async function createProject(req, res) {
     const { prompt } = req.body;
     if (!prompt || typeof prompt !== "string") {
@@ -19,31 +27,106 @@ export async function createProject(req, res) {
         return;
     }
 
-    const now = new Date();
-    const project = await Project.create({
-        name: "Planning project...",
-        description: prompt,
-        files: {},
-        messages: [
-            { role: "user", content: prompt },
-            { role: "assistant", content: "Planning project structure..." },
-        ],
-        version: 0,
+    // Guard: Block users whose email is not yet verified
+    const userRecord = await User.findById(req.user.userId).select("emailVerified");
+    if (userRecord && userRecord.emailVerified === false) {
+        return res.status(403).json({
+            code: "EMAIL_NOT_VERIFIED",
+            error: "Please verify your email address before generating a website.",
+        });
+    }
+
+    // 1. Guard: Block more than 1 active generation per user at a time
+    const activeProject = await Project.findOne({
         owner: req.user.userId,
-        status: "pending",
-        filesPlanned: [],
-        filesGenerated: [],
-        currentFile: null,
-        error: null,
-        generationStartedAt: now,
-        generationDuration: null,
-        completedAt: null,
+        status: { $in: ["queued", "pending", "generating", "revising"] },
     });
+    if (activeProject) {
+        return res.status(409).json({
+            code: "GENERATION_IN_PROGRESS",
+            message: "A website generation is already in progress. Please wait.",
+        });
+    }
 
-    runBackgroundGeneration(project._id.toString(), prompt).catch((err) => {
-        console.error(`[Background AI] Fatal generation error for project ${project._id}:`, err);
-    });
+    // 2. Reserve credits atomically before enqueueing
+    const unitsToCharge = CREDITS_CONFIG.COST_GENERATE_UNITS;
+    try {
+        await reserveCredits(req.user.userId, unitsToCharge, {
+            reason: "Generate new project",
+        });
+    } catch (err) {
+        if (err.code === "INSUFFICIENT_CREDITS" || err instanceof InsufficientCreditsError) {
+            return res.status(402).json({
+                code: "INSUFFICIENT_CREDITS",
+                balance: err.balance,
+                required: err.required,
+            });
+        }
+        throw err;
+    }
 
+    const now = new Date();
+    let project;
+    try {
+        project = await Project.create({
+            name: "Planning project...",
+            description: prompt,
+            files: {},
+            messages: [
+                { role: "user", content: prompt },
+                { role: "assistant", content: "Planning project structure..." },
+            ],
+            version: 0,
+            owner: req.user.userId,
+            status: "queued",
+            filesPlanned: [],
+            filesGenerated: [],
+            currentFile: null,
+            error: null,
+            generationStartedAt: now,
+            generationDuration: null,
+            completedAt: null,
+            creditsRefunded: false,
+        });
+    } catch (createErr) {
+        await refundCredits(req.user.userId, unitsToCharge, {
+            reason: `Project DB creation failed: ${createErr.message}`,
+        });
+        throw createErr;
+    }
+
+    // 3. Enqueue job into BullMQ
+    try {
+        await addGenerationJob({
+            projectId: project._id.toString(),
+            prompt,
+            userId: req.user.userId,
+            unitsReserved: unitsToCharge,
+            version: 0,
+        });
+
+        await publishEvent(project._id.toString(), {
+            type: "queued",
+            data: { message: "Project queued for generation" },
+        });
+    } catch (queueErr) {
+        console.error(`[Queue Error] Failed to enqueue generation job:`, queueErr);
+        await Project.findByIdAndUpdate(project._id, {
+            status: "failed",
+            error: "Queue service unavailable",
+        });
+
+        await refundCredits(req.user.userId, unitsToCharge, {
+            projectId: project._id,
+            reason: "Queue unavailable; generation aborted",
+        });
+
+        return res.status(503).json({
+            error: "Generation service temporarily unavailable. Credits have been refunded.",
+        });
+    }
+
+    // Return project immediately
     res.status(201).json({
         _id: project._id,
         name: project.name,
@@ -63,99 +146,177 @@ export async function createProject(req, res) {
     });
 }
 
-// Background worker to progressively generate files and update database in real time.
-async function runBackgroundGeneration(projectId, prompt) {
+// POST /api/projects/:id/cancel
+// Cancels a waiting or running generation/revision job and refunds credits.
+export async function cancelProject(req, res) {
+    const { id } = req.params;
+    if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const project = await Project.findOne({ _id: id, owner: req.user.userId });
+    if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (["completed", "failed", "cancelled"].includes(project.status)) {
+        return res.status(400).json({ error: `Cannot cancel a project that is already ${project.status}` });
+    }
+
+    // Set cancellation flag in Redis
+    await redisClient.set(`cancel:${id}`, "1", "EX", 600);
+
+    // Notify active workers via Pub/Sub to trigger AbortController
     try {
-        console.log(`[Background AI] Starting generation for project ${projectId}`);
-        let saveQueue = Promise.resolve();
+        await redisClient.publish("project:cancel", JSON.stringify({ projectId: id }));
+    } catch (pubErr) {
+        console.error("[Cancel PubSub Error]", pubErr.message);
+    }
 
-        const result = await generateProject(prompt, {
-            onPlan: async (plan) => {
-                console.log(`[Background AI] Plan created for project ${projectId}. Planned ${plan.files.length} files.`);
-                const fileList = plan.files.map((f) => `-\`${f.path}\`: ${f.description}`).join("\n");
-
-                await Project.findByIdAndUpdate(projectId, {
-                    name: plan.projectName || "Generated Project",
-                    status: "generating",
-                    filesPlanned: plan.files,
-                    $push: {
-                        messages: {
-                            role: "assistant",
-                            content: `Planned website structure:\n${fileList}`,
-                            timestamp: new Date(),
-                        },
-                    },
-                });
-            },
-            onFileStart: async (path) => {
-                console.log(`[Background AI] Starting file ${path} for project ${projectId}`);
-                await Project.findByIdAndUpdate(projectId, { currentFile: path });
-            },
-            onFileComplete: async (path, code) => {
-                console.log(`[Background AI] Finished file ${path} for project ${projectId}`);
-                saveQueue = saveQueue.then(async () => {
-                    const project = await Project.findById(projectId);
-                    if (!project) return;
-
-                    project.files = project.files || {};
-                    project.files[path] = { content: code, hash: hashContent(code) };
-                    project.filesGenerated = Array.from(new Set([...(project.filesGenerated || []), path]));
-                    project.messages.push({
-                        role: "assistant",
-                        content: `Created file "${path}"`,
-                        timestamp: new Date(),
-                    });
-                    project.currentFile = null;
-                    project.markModified("files");
-                    await project.save();
-                }).catch((err) => {
-                    console.error(`[Background AI] Error saving file ${path}:`, err);
-                });
-                await saveQueue;
-            },
-        });
-
-        // Ensure all concurrent file saves have finished flushing to DB
-        await saveQueue;
-
-        console.log(`[Background AI] Successfully generated project ${projectId}`);
-        const project = await Project.findById(projectId);
-        if (project) {
-            project.status = "completed";
-            project.version = 1;
-            if (result.description) {
-                project.name = result.description;
+    // Attempt to remove waiting/delayed job from BullMQ queue
+    try {
+        const jobId = project.version === 0 ? `generate_${id}_v0` : `revise_${id}_v${project.version}`;
+        const job = await generationQueue.getJob(jobId);
+        if (job) {
+            const state = await job.getState();
+            if (["waiting", "delayed"].includes(state)) {
+                await job.remove();
+                console.log(`[Cancel] Removed job ${jobId} directly from queue`);
             }
-            const startTime = project.generationStartedAt || project.createdAt || new Date();
-            const durationSec = Math.max(1, Math.round((Date.now() - new Date(startTime).getTime()) / 1000));
-            project.generationDuration = durationSec;
-            project.completedAt = new Date();
-            project.messages.push({
-                role: "assistant",
-                content: `Website generation complete in ${durationSec}s! You can view and edit the files.`,
-                timestamp: new Date(),
-            });
-            await project.save();
         }
-    } catch (err) {
-        console.error(`[Background AI] Fatal generation error for project ${projectId}:`, err);
-        const project = await Project.findById(projectId);
-        const startTime = project?.generationStartedAt || project?.createdAt || new Date();
-        const durationSec = Math.max(1, Math.round((Date.now() - new Date(startTime).getTime()) / 1000));
-        await Project.findByIdAndUpdate(projectId, {
-            status: "failed",
-            generationDuration: durationSec,
-            completedAt: new Date(),
-            error: err.message || "Unknown generation error",
-            $push: {
-                messages: {
-                    role: "assistant",
-                    content: `❌ Generation failed: ${err.message || "Unknown generation error"}`,
-                    timestamp: new Date(),
-                },
+    } catch (qErr) {
+        console.warn(`[Cancel Queue Warning] Could not remove job:`, qErr.message);
+    }
+
+    // Atomically claim refund right on Project to ensure single refund
+    const updated = await Project.findOneAndUpdate(
+        { _id: id, creditsRefunded: { $ne: true } },
+        {
+            $set: {
+                status: "cancelled",
+                error: "Generation was cancelled by user",
+                completedAt: new Date(),
+                creditsRefunded: true,
             },
+        },
+        { returnDocument: "after" }
+    );
+
+    const units = project.version === 0 ? CREDITS_CONFIG.COST_GENERATE_UNITS : CREDITS_CONFIG.COST_REVISE_UNITS;
+    if (updated) {
+        try {
+            await refundCredits(req.user.userId, units, {
+                projectId: id,
+                reason: "Generation cancelled by user",
+            });
+            await publishEvent(id, {
+                type: "credits_refunded",
+                data: { unitsRefunded: units, reason: "Generation cancelled by user" },
+            });
+        } catch (refErr) {
+            console.error("[Cancel Refund Error]", refErr.message);
+        }
+    } else {
+        await Project.findByIdAndUpdate(id, {
+            status: "cancelled",
+            error: "Generation was cancelled by user",
+            completedAt: new Date(),
         });
     }
+
+    await publishEvent(id, {
+        type: "cancelled",
+        data: { message: "Cancelled by user" },
+    });
+
+    res.json({ success: true, message: "Generation cancelled successfully" });
+}
+
+// GET /api/projects/:id/events
+// Server-Sent Events (SSE) stream for real-time progress updates.
+export async function streamProjectEvents(req, res) {
+    const { id } = req.params;
+    if (!req.user) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const userId = req.user.userId.toString();
+    const currentConns = userSSEConnections.get(userId) || 0;
+    if (currentConns >= 8) {
+        return res.status(429).json({ error: "Too many concurrent event stream connections" });
+    }
+    userSSEConnections.set(userId, currentConns + 1);
+
+    const project = await Project.findOne({ _id: id, owner: req.user.userId });
+    if (!project) {
+        userSSEConnections.set(userId, Math.max(0, (userSSEConnections.get(userId) || 1) - 1));
+        return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Set SSE headers
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+    }
+
+    // 1. Immediately send initial snapshot from MongoDB so reloads/reconnects always get latest state
+    const snapshot = await getProjectProgressSnapshot(id);
+    if (snapshot) {
+        res.write(`id: 0\nevent: snapshot\ndata: ${JSON.stringify(snapshot.data)}\n\n`);
+    }
+
+    // If project is already terminated, finish stream immediately
+    if (["completed", "failed", "cancelled"].includes(project.status)) {
+        res.write(`event: ${project.status}\ndata: ${JSON.stringify({ status: project.status })}\n\n`);
+        userSSEConnections.set(userId, Math.max(0, (userSSEConnections.get(userId) || 1) - 1));
+        return res.end();
+    }
+
+    // 2. Subscribe to Redis Pub/Sub channel for live events
+    const subscriber = createRedisSubscriber();
+    const channel = `project:${id}`;
+    let isClosed = false;
+
+    await subscriber.subscribe(channel);
+
+    subscriber.on("message", (chan, message) => {
+        if (chan !== channel || isClosed) return;
+        try {
+            const event = JSON.parse(message);
+            res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
+
+            if (["completed", "failed", "cancelled"].includes(event.type)) {
+                cleanup();
+            }
+        } catch (e) {
+            console.error("[SSE Event Parse Error]", e.message);
+        }
+    });
+
+    // 3. Heartbeat ping
+    const heartbeatMs = parseInt(process.env.SSE_HEARTBEAT_MS || "20000", 10);
+    const heartbeatTimer = setInterval(() => {
+        if (!isClosed) {
+            res.write(": ping\n\n");
+        }
+    }, heartbeatMs);
+
+    const cleanup = () => {
+        if (isClosed) return;
+        isClosed = true;
+        clearInterval(heartbeatTimer);
+        userSSEConnections.set(userId, Math.max(0, (userSSEConnections.get(userId) || 1) - 1));
+        subscriber.unsubscribe(channel).catch(() => {});
+        subscriber.quit().catch(() => {});
+        res.end();
+    };
+
+    req.on("close", cleanup);
+    req.on("error", cleanup);
 }
 
 // GET /api/projects
@@ -247,7 +408,7 @@ export async function updateProjectFiles(req, res) {
         return;
     }
 
-    if (project.status === "generating" || project.status === "pending") {
+    if (["queued", "pending", "generating", "revising"].includes(project.status)) {
         res.status(400).json({ error: "Cannot modify files while website generation is in progress" });
         return;
     }
