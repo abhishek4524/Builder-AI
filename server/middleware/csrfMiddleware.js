@@ -43,7 +43,11 @@ export function csrfProtection(req, res, next) {
     }
 
     const normalizedOrigin = requestOrigin.toLowerCase();
-    const isAllowed = allowedOrigins.includes(normalizedOrigin);
+    const isAllowed =
+        allowedOrigins.includes(normalizedOrigin) ||
+        normalizedOrigin.endsWith(".vercel.app") ||
+        normalizedOrigin.includes("ngrok") ||
+        normalizedOrigin.includes("localhost");
 
     if (!isAllowed) {
         return res.status(403).json({

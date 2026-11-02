@@ -118,4 +118,10 @@ const port = process.env.PORT || 3000;
 
 app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
+    // Start background BullMQ generation worker in the same process unless explicitly disabled
+    if (process.env.START_WORKER !== "false") {
+        import("./worker.js")
+            .then(() => console.log("[Worker] Background AI generation worker started successfully"))
+            .catch((err) => console.error("[Worker] Failed to start background worker:", err.message));
+    }
 });
