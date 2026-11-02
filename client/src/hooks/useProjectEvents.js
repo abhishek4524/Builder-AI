@@ -168,12 +168,23 @@ export function useProjectEvents(projectId) {
             activeProjects.status === "pending" ||
             activeProjects.status === "revising";
 
+        let pollTimer = null;
+
         if (isOngoing) {
             connect();
+            // Resilient fallback polling every 2.5s to guarantee live progress even if SSE drops
+            pollTimer = setInterval(async () => {
+                if (!isSubscribed) return;
+                await loadProject(projectId, true);
+                await refreshCredits();
+            }, 2500);
         }
 
         return () => {
             isSubscribed = false;
+            if (pollTimer) {
+                clearInterval(pollTimer);
+            }
             if (reconnectTimeoutRef.current) {
                 clearTimeout(reconnectTimeoutRef.current);
             }

@@ -41,6 +41,8 @@ export function creditsToUnits(credits) {
  * Unknown or free models default to $0.
  */
 export const MODEL_PRICING = {
+    "google/gemini-2.0-flash-001": { inputPer1M: 0.10, outputPer1M: 0.40 },
+    "qwen/qwen-2.5-coder-32b-instruct": { inputPer1M: 0.06, outputPer1M: 0.15 },
     "deepseek/deepseek-v4.1-flash": { inputPer1M: 0.14, outputPer1M: 0.28 },
     "deepseek/deepseek-chat": { inputPer1M: 0.14, outputPer1M: 0.28 },
     "openai/gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.60 },

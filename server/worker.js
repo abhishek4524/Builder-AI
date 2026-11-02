@@ -331,7 +331,7 @@ async function processGenerationJob(job) {
             return { cancelled: true };
         }
 
-        console.error(`[Worker Job Error] Job ${job.id} error:`, err.message);
+        console.error(`[Worker Job Error] Job ${job.id} error:`, err.message, err.responseBody || err.data || "");
 
         // Check if this was the last attempt
         const maxAttempts = job.opts.attempts || 2;

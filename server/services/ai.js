@@ -14,6 +14,11 @@ const MAX_CONCURRENCY = parseInt(process.env.AI_MAX_CONCURRENCY || "6", 10);
 const openrouter = createOpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENROUTER_API_KEY,
+    compatibility: "compatible",
+    headers: {
+        "HTTP-Referer": "https://i1.app",
+        "X-Title": "i1 AI Website Builder",
+    },
 });
 
 const model = openrouter(MODEL);
@@ -25,15 +30,23 @@ async function generateSingleFile(file, allFiles, prompt, alreadyGeneratedFiles,
     const userMsg = `Project: ${prompt}\n\nWrite the complete code for: ${file.path}\nPurpose: ${file.description}`;
 
     console.log(`[AI] Creating file: ${file.path}...`);
-    const { object, usage } = await generateObject({
-        model,
-        schema: FileCodeSchema,
-        system,
-        prompt: userMsg,
-        maxRetries: 2,
-        maxTokens: CREDITS_CONFIG.MAX_OUTPUT_TOKENS,
-        abortSignal: options.signal,
-    });
+    let object, usage;
+    try {
+        const res = await generateObject({
+            model,
+            schema: FileCodeSchema,
+            system,
+            prompt: userMsg,
+            maxRetries: 2,
+            maxTokens: Math.min(CREDITS_CONFIG.MAX_OUTPUT_TOKENS, 6000),
+            abortSignal: options.signal,
+        });
+        object = res.object;
+        usage = res.usage;
+    } catch (err) {
+        console.error(`[AI File Error: ${file.path}]`, err.message, err.responseBody || err.data || "");
+        throw err;
+    }
 
     let code = normalizeContent(object.code);
 
@@ -77,15 +90,36 @@ export async function generateProject(prompt, callbacks, options = {}) {
 
     // Phase 1: Plan
     console.log(`[AI] Phase 1: Planning file structure for: "${prompt.slice(0, 80)}..."`);
-    const { object: plan, usage: planUsage } = await generateObject({
-        model,
-        schema: FilePlanSchema,
-        system: FILE_PLAN_SYSTEM,
-        prompt: `Plan a React website for: ${prompt}`,
-        maxRetries: 2,
-        maxTokens: CREDITS_CONFIG.MAX_OUTPUT_TOKENS,
-        abortSignal: options.signal,
-    });
+    let plan, planUsage;
+    try {
+        const res = await generateObject({
+            model,
+            schema: FilePlanSchema,
+            system: FILE_PLAN_SYSTEM,
+            prompt: `Plan a React website for: ${prompt}`,
+            maxRetries: 2,
+            maxTokens: Math.min(CREDITS_CONFIG.MAX_OUTPUT_TOKENS, 4000),
+            abortSignal: options.signal,
+        });
+        plan = res.object;
+        planUsage = res.usage;
+
+        // Clean, normalize and deduplicate file paths from LLM plan
+        const seenPaths = new Set();
+        const cleanedFiles = [];
+        for (const f of (plan.files || [])) {
+            let cleanPath = (f.path || "").trim().replace(/[,;]+$/, "").trim();
+            if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
+            if (cleanPath && !seenPaths.has(cleanPath)) {
+                seenPaths.add(cleanPath);
+                cleanedFiles.push({ ...f, path: cleanPath });
+            }
+        }
+        plan.files = cleanedFiles;
+    } catch (err) {
+        console.error("[AI Phase 1 Error]", err.message, err.responseBody || err.data || "");
+        throw err;
+    }
 
     recordUsage(planUsage);
 
@@ -246,7 +280,7 @@ export async function reviseProject(prompt, manifest, relevantFiles, recentMessa
         system: REVISE_SYSTEM,
         prompt: contextParts.join("\n"),
         maxRetries: 2,
-        maxTokens: CREDITS_CONFIG.MAX_OUTPUT_TOKENS,
+        maxTokens: Math.min(CREDITS_CONFIG.MAX_OUTPUT_TOKENS, 6000),
         abortSignal: options.signal,
     });
 
