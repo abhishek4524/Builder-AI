@@ -3,6 +3,9 @@ import { Project } from "../models/Project.js";
 import { UsageLog } from "../models/UsageLog.js";
 import { CreditTransaction } from "../models/CreditTransaction.js";
 import { Payment } from "../models/Payment.js";
+import { grantCredits } from "../services/credits.js";
+import { isRedisHealthy } from "../config/redis.js";
+import { generationQueue } from "../queues/generationQueue.js";
 import mongoose from "mongoose";
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
@@ -378,4 +381,145 @@ export async function getPlanBreakdown(req, res) {
     ]);
 
     res.json({ data: rows.map((r) => ({ plan: r._id || "free", count: r.count })) });
+}
+
+// ─── POST /api/admin/users/:id/credits ───────────────────────────────────────
+/**
+ * Admin action: Grant or deduct credits for a user.
+ */
+export async function adjustUserCredits(req, res) {
+    const { id } = req.params;
+    const { credits, reason } = req.body;
+    const numCredits = Number(credits);
+
+    if (isNaN(numCredits) || numCredits === 0) {
+        return res.status(400).json({ error: "Invalid credit amount" });
+    }
+
+    const units = Math.round(numCredits * 10);
+    const user = await User.findById(id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const adminEmail = req.adminUser?.email || "Admin";
+
+    if (units > 0) {
+        await grantCredits(id, units, { reason: reason || `Admin top-up by ${adminEmail}` });
+    } else {
+        await User.findByIdAndUpdate(id, { $inc: { creditUnits: units } });
+        await CreditTransaction.create({
+            userId: id,
+            type: "adjustment",
+            units: units,
+            balanceAfter: Math.max(0, user.creditUnits + units),
+            reason: reason || `Admin deduction by ${adminEmail}`,
+        });
+    }
+
+    const updated = await User.findById(id).select("-password");
+    res.json({
+        message: `${numCredits > 0 ? "+" : ""}${numCredits} credits updated for ${user.email}`,
+        user: { ...updated.toObject(), balance: updated.creditUnits / 10 },
+    });
+}
+
+// ─── PATCH /api/admin/users/:id/plan ─────────────────────────────────────────
+/**
+ * Admin action: Switch user plan between free and pro.
+ */
+export async function updateUserPlan(req, res) {
+    const { id } = req.params;
+    const { plan } = req.body;
+
+    if (!["free", "pro", "enterprise"].includes(plan)) {
+        return res.status(400).json({ error: "Invalid plan. Choose 'free' or 'pro'." });
+    }
+
+    const updateData = {
+        plan,
+        planExpiresAt: plan === "pro" ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null,
+    };
+
+    const updated = await User.findByIdAndUpdate(id, updateData, { returnDocument: "after" }).select("-password");
+    if (!updated) return res.status(404).json({ error: "User not found" });
+
+    res.json({
+        message: `Plan changed to ${plan.toUpperCase()} for ${updated.email}`,
+        user: { ...updated.toObject(), balance: updated.creditUnits / 10 },
+    });
+}
+
+// ─── GET /api/admin/projects/list ───────────────────────────────────────────
+/**
+ * Paginated and searchable projects list for admin view.
+ */
+export async function getProjectsList(req, res) {
+    const page = Math.max(1, parseInt(req.query.page || "1", 10));
+    const limit = Math.min(50, Math.max(5, parseInt(req.query.limit || "15", 10)));
+    const search = req.query.search?.trim() || "";
+    const status = req.query.status || "";
+
+    const filter = {};
+    if (status && status !== "all") {
+        filter.status = status;
+    }
+    if (search) {
+        filter.name = { $regex: search, $options: "i" };
+    }
+
+    const [projects, total] = await Promise.all([
+        Project.find(filter)
+            .select("name status version generationDuration createdAt completedAt currentFile isPublished")
+            .populate("owner", "name email")
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit)
+            .lean(),
+        Project.countDocuments(filter),
+    ]);
+
+    res.json({ projects, total, page, limit, pages: Math.ceil(total / limit) });
+}
+
+// ─── GET /api/admin/system/health ────────────────────────────────────────────
+/**
+ * System health, queues, memory, and runtime statistics.
+ */
+export async function getSystemHealth(req, res) {
+    let redisOk = false;
+    try {
+        redisOk = await isRedisHealthy();
+    } catch {}
+
+    let queueCounts = { waiting: 0, active: 0, completed: 0, failed: 0, delayed: 0 };
+    try {
+        queueCounts = await generationQueue.getJobCounts("waiting", "active", "completed", "failed", "delayed");
+    } catch {}
+
+    const mem = process.memoryUsage();
+    const uptimeSec = Math.floor(process.uptime());
+
+    res.json({
+        server: {
+            status: "operational",
+            nodeVersion: process.version,
+            uptimeSeconds: uptimeSec,
+            memoryRssMb: Math.round(mem.rss / 1024 / 1024),
+            memoryHeapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+        },
+        database: {
+            mongoStatus: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+        },
+        redis: {
+            status: redisOk ? "connected" : "disconnected",
+        },
+        queue: {
+            name: "generation",
+            counts: queueCounts,
+        },
+        ai: {
+            model: process.env.OPENROUTER_MODEL || "default",
+            maxConcurrency: process.env.AI_MAX_CONCURRENCY || "3",
+            workerConcurrency: process.env.WORKER_CONCURRENCY || "2",
+        },
+    });
 }
