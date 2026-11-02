@@ -190,6 +190,9 @@ export function validateAndFixCode(code, filePath, context) {
         throw new Error(`Syntax error in ${filePath}: ${parseResult.error.message}`);
     }
 
+    // Sanitize any remaining malformed ././ import paths from AI output
+    code = code.replace(/(['"])\.\/(?:\.\/)+/g, '$1./');
+
     return { code: code.trim() + "\n", warnings };
 }
 
@@ -261,8 +264,10 @@ function resolvePath(baseDir, relativePath) {
 }
 
 function getRelativePath(fromDir, toPath) {
+    // Strip leading ./ from toPath to avoid generating ././ double-dot segments
+    const toPathClean = toPath.startsWith("./") ? toPath.slice(2) : toPath;
     const fromParts = fromDir.split("/").filter(Boolean);
-    const toParts = toPath.split("/").filter(Boolean);
+    const toParts = toPathClean.split("/").filter(Boolean);
 
     let commonLength = 0;
     while (commonLength < fromParts.length && commonLength < toParts.length && fromParts[commonLength] === toParts[commonLength]) {

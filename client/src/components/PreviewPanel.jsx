@@ -76,13 +76,16 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
     });
   };
 
-  //Convert liveFiles to Sandpack format
+  // Convert liveFiles to Sandpack format with import path normalization
   const sandpackFiles = useMemo(() => {
     const spFiles = {};
     for (const [path, content] of Object.entries(liveFiles)) {
-      const fileCode =
+      const rawCode =
         typeof content === "string" ? content : content.content || "";
-      spFiles[path] = {
+      // Clean up malformed relative imports like '././components/...' -> './components/...'
+      const fileCode = rawCode.replace(/(['"])\.\/(?:\.\/)+/g, '$1./');
+      const cleanPath = path.startsWith("/") ? path : "/" + path;
+      spFiles[cleanPath] = {
         code: fileCode,
         active: path === activeFile,
       };
