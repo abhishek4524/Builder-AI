@@ -47,7 +47,7 @@ export async function adminMiddleware(req, res, next) {
     const bearer = req.headers.authorization?.startsWith("Bearer ")
         ? req.headers.authorization.slice(7).trim()
         : null;
-    const token = req.cookies?.token || bearer;
+    const token = req.cookies?.token || bearer || req.query?.token;
 
     if (!token) {
         return res.status(401).json({ error: "Access denied. Please log in." });

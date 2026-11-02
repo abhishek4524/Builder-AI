@@ -28,7 +28,9 @@ export function useProjectEvents(projectId) {
             }
 
             const baseUrl = import.meta.env.VITE_BASE_URL || "";
-            const streamUrl = `${baseUrl}/api/projects/${projectId}/events`;
+            const token = localStorage.getItem("token");
+            const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
+            const streamUrl = `${baseUrl}/api/projects/${projectId}/events?ngrok-skip-browser-warning=true${tokenQuery}`;
 
             const es = new EventSource(streamUrl, { withCredentials: true });
             eventSourceRef.current = es;

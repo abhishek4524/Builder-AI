@@ -44,7 +44,9 @@ export default function ActivityHeatmap({ appName = "i1" }) {
       }
 
       const baseUrl = import.meta.env.VITE_BASE_URL || "";
-      const sseUrl = `${baseUrl}/api/account/activity/stream`;
+      const token = localStorage.getItem("token");
+      const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : "";
+      const sseUrl = `${baseUrl}/api/account/activity/stream?ngrok-skip-browser-warning=true${tokenQuery}`;
 
       try {
         const es = new EventSource(sseUrl, { withCredentials: true });
