@@ -29,14 +29,14 @@ export async function createProject(req, res) {
         return;
     }
 
-    // Guard: Block users whose email is not yet verified
-    const userRecord = await User.findById(req.user.userId).select("emailVerified");
-    if (userRecord && userRecord.emailVerified === false) {
-        return res.status(403).json({
-            code: "EMAIL_NOT_VERIFIED",
-            error: "Please verify your email address before generating a website.",
-        });
-    }
+    // EMAIL VERIFICATION PAUSED — re-enable this block when email service is live in production
+    // const userRecord = await User.findById(req.user.userId).select("emailVerified");
+    // if (userRecord && userRecord.emailVerified === false) {
+    //     return res.status(403).json({
+    //         code: "EMAIL_NOT_VERIFIED",
+    //         error: "Please verify your email address before generating a website.",
+    //     });
+    // }
 
     // 1. Guard: Block more than 1 active generation per user at a time
     const activeProject = await Project.findOne({

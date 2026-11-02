@@ -11,6 +11,7 @@ import {
   SunIcon,
   MoonIcon,
   MonitorIcon,
+  ShieldCheckIcon,
 } from "lucide-react";
 
 export default function UserDropdown({ variant }) {
@@ -105,6 +106,16 @@ export default function UserDropdown({ variant }) {
             >
               <CreditCardIcon size={14} className="text-zinc-400 dark:text-zinc-400" />
               <span>Pricing & Plans</span>
+            </button>
+            <button
+              onClick={() => {
+                setIsOpen(false);
+                navigate("/admin");
+              }}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:text-zinc-950 dark:hover:text-white transition-colors cursor-pointer text-left"
+            >
+              <ShieldCheckIcon size={14} className="text-zinc-400 dark:text-zinc-400" />
+              <span>Admin Dashboard</span>
             </button>
           </div>
 

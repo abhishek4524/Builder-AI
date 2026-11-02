@@ -11,6 +11,7 @@ import VerifyEmailPage from './pages/VerifyEmailPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import AccountPage from './pages/AccountPage'
+import AdminDashboard from './pages/AdminDashboard'
 import { Toaster } from 'react-hot-toast'
 import { useTheme } from './context/ThemeContext'
 
@@ -44,6 +45,7 @@ const App = () => {
           <Route path="/pricing" element={<PricingPage />} />
           <Route path="/builder/:id" element={<BuilderPage />} />
           <Route path="/preview/:id" element={<PreviewPage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
         </Route>
 
         {/* Public Routes */}

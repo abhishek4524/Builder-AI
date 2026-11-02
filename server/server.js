@@ -12,6 +12,7 @@ import projectRouter from "./routes/projectRoutes.js";
 import creditRouter from "./routes/creditRoutes.js";
 import billingRouter from "./routes/billingRoutes.js";
 import accountRouter from "./routes/accountRoutes.js";
+import adminRouter from "./routes/adminRoutes.js";
 import { handleWebhook } from "./controllers/billingController.js";
 import { globalLimiter, webhookLimiter } from "./middleware/rateLimiters.js";
 import { csrfProtection } from "./middleware/csrfMiddleware.js";
@@ -91,6 +92,7 @@ app.use("/api/account", accountRouter);
 app.use("/api/projects", projectRouter);
 app.use("/api", creditRouter);
 app.use("/api/billing", billingRouter);
+app.use("/api/admin", adminRouter);
 
 // Centralized error handler
 app.use((err, _req, res, _next) => {
