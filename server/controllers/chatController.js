@@ -3,6 +3,7 @@ import { CREDITS_CONFIG } from "../config/credits.js";
 import { reserveCredits, refundCredits, InsufficientCreditsError } from "../services/credits.js";
 import { addRevisionJob } from "../queues/generationQueue.js";
 import { publishEvent } from "../services/events.js";
+import { getProjectOwnershipQuery } from "./projectController.js";
 
 export function buildManifest(files) {
     const manifest = [];
@@ -27,7 +28,7 @@ export async function chat(req, res) {
         return;
     }
 
-    const project = await Project.findOne({ _id: req.params.id, owner: req.user.userId });
+    const project = await Project.findOne(getProjectOwnershipQuery(req, req.params.id));
     if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;

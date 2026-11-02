@@ -7,16 +7,19 @@ import { useAppContext } from '../context/AppContext'
 const PreviewPage = () => {
   const { id } = useParams()
   const { activeProjects: project, loadingActiveProjects: loading, loadProject } = useAppContext()
+  
   useEffect(() => {
-    if(id){
+    if (id) {
       loadProject(id)
     }
-  },[id])
-  if(loading){
+  }, [id, loadProject])
+
+  if (loading || !project || project._id !== id) {
     return <Loading />
   }
+
   return (
-    <FullPagePreview files={project?.files || {}}/>
+    <FullPagePreview files={project?.files || {}} />
   )
 }
 

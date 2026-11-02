@@ -7,7 +7,7 @@ import { User } from "../models/User.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function getAdminEmails() {
+export function getAdminEmails() {
     let raw = process.env.ADMIN_EMAILS;
 
     // Fallback: check server/.env directly in case server was started before .env was edited

@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { User } from "../models/User.js";
+import { getAdminEmails } from "./adminMiddleware.js";
 
 /**
  * Auth middleware — verifies JWT session cookie or Authorization Bearer token.
@@ -20,7 +21,7 @@ export async function authMiddleware(req, res, next) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret");
 
     // Validate tokenVersion and ensure account is active and not pending deletion
-    const user = await User.findById(decoded.userId).select("tokenVersion status deletedAt");
+    const user = await User.findById(decoded.userId).select("email tokenVersion status deletedAt");
     if (!user || (decoded.tokenVersion !== undefined && user.tokenVersion !== decoded.tokenVersion)) {
       return res
         .status(401)
@@ -34,7 +35,14 @@ export async function authMiddleware(req, res, next) {
       });
     }
 
-    req.user = decoded;
+    const adminEmails = getAdminEmails();
+    const userEmail = (user.email || decoded.email || "").trim().toLowerCase();
+
+    req.user = {
+      ...decoded,
+      email: userEmail,
+      isAdmin: adminEmails.includes(userEmail),
+    };
     return next();
   } catch (err) {
     return res

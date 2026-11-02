@@ -13,6 +13,17 @@ function hashContent(content) {
     return crypto.createHash("md5").update(content).digest("hex").slice(0, 12);
 }
 
+/**
+ * Returns project query filter. Admins have omnipotent read/manage access
+ * across all users' projects in builder, preview, and inspections.
+ */
+export function getProjectOwnershipQuery(req, id) {
+    if (req.user?.isAdmin) {
+        return { _id: id };
+    }
+    return { _id: id, owner: req.user.userId };
+}
+
 // Track active SSE connections per user to prevent connection exhaustion
 const userSSEConnections = new Map();
 
@@ -156,7 +167,7 @@ export async function cancelProject(req, res) {
         return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const project = await Project.findOne({ _id: id, owner: req.user.userId });
+    const project = await Project.findOne(getProjectOwnershipQuery(req, id));
     if (!project) {
         return res.status(404).json({ error: "Project not found" });
     }
@@ -249,7 +260,7 @@ export async function streamProjectEvents(req, res) {
     }
     userSSEConnections.set(userId, currentConns + 1);
 
-    const project = await Project.findOne({ _id: id, owner: req.user.userId });
+    const project = await Project.findOne(getProjectOwnershipQuery(req, id));
     if (!project) {
         userSSEConnections.set(userId, Math.max(0, (userSSEConnections.get(userId) || 1) - 1));
         return res.status(404).json({ error: "Project not found" });
@@ -345,7 +356,7 @@ export async function getProject(req, res) {
         return;
     }
 
-    const project = await Project.findOne({ _id: req.params.id, owner: req.user.userId });
+    const project = await Project.findOne(getProjectOwnershipQuery(req, req.params.id));
     if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -383,7 +394,7 @@ export async function deleteProject(req, res) {
         return;
     }
 
-    const result = await Project.findOneAndDelete({ _id: req.params.id, owner: req.user.userId });
+    const result = await Project.findOneAndDelete(getProjectOwnershipQuery(req, req.params.id));
     if (!result) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -404,7 +415,7 @@ export async function updateProjectFiles(req, res) {
         return;
     }
 
-    const project = await Project.findOne({ _id: req.params.id, owner: req.user.userId });
+    const project = await Project.findOne(getProjectOwnershipQuery(req, req.params.id));
     if (!project) {
         res.status(404).json({ error: "Project not found" });
         return;
@@ -467,7 +478,7 @@ export async function publishProject(req, res) {
     }
 
     const project = await Project.findOneAndUpdate(
-        { _id: req.params.id, owner: req.user.userId },
+        getProjectOwnershipQuery(req, req.params.id),
         { published: true },
         { returnDocument: "after" }
     );
