@@ -6,6 +6,20 @@ const api = axios.create({
     withCredentials: true,
 });
 
+// Request interceptor to attach Authorization Bearer token & ngrok headers
+api.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem("token");
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`;
+        }
+        // Prevents ngrok free-tier browser interstitial warning page
+        config.headers["ngrok-skip-browser-warning"] = "true";
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
 let onOutOfCreditsCallback = null;
 
 export function setOnOutOfCreditsHandler(handler) {

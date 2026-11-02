@@ -31,11 +31,12 @@ app.set("trust proxy", parseInt(process.env.TRUST_PROXY || "0", 10));
 app.use(
     helmet({
         crossOriginResourcePolicy: { policy: "cross-origin" },
+        crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     })
 );
 app.disable("x-powered-by");
 
-// Strict CORS — only allow origins listed in env
+// Strict CORS — allow env origins + any vercel preview/prod or ngrok
 const allowedOrigins = process.env.ORIGINS
     ? process.env.ORIGINS.split(",").map((o) => o.trim())
     : ["http://localhost:5173", "http://localhost:3000"];
@@ -43,8 +44,14 @@ const allowedOrigins = process.env.ORIGINS
 app.use(
     cors({
         origin: (origin, callback) => {
-            // Allow requests with no origin (e.g. curl, mobile apps, webhooks) only in dev
-            if (!origin || allowedOrigins.includes(origin)) {
+            // Allow requests with no origin (e.g. curl, mobile apps, webhooks)
+            if (
+                !origin ||
+                allowedOrigins.includes(origin) ||
+                origin.endsWith(".vercel.app") ||
+                origin.includes("localhost") ||
+                origin.includes("ngrok")
+            ) {
                 callback(null, true);
             } else {
                 callback(new Error(`CORS: origin ${origin} not allowed`));

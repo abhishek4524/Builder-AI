@@ -217,7 +217,7 @@ const AuthPage = ({ mode }) => {
                   onError={handleGoogleError}
                   theme={resolvedTheme === "dark" ? "filled_black" : "outline"}
                   shape="rectangular"
-                  width="100%"
+                  width="384"
                   text={isLogin ? "signin_with" : "signup_with"}
                 />
               </div>

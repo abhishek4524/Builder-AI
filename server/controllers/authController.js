@@ -18,14 +18,15 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // Helper to set cookie with hardened security
 export const setSessionCookie = (res, payload) => {
   const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
-  const sameSite = process.env.COOKIE_SAME_SITE || "lax";
+  const sameSite = process.env.COOKIE_SAME_SITE || "none";
   res.cookie("token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: sameSite === "none" ? true : process.env.NODE_ENV === "production",
     sameSite: sameSite,
     maxAge: 30 * 24 * 60 * 60 * 1000,
     path: "/",
   });
+  return token;
 };
 
 export async function register(req, res) {
@@ -63,7 +64,7 @@ export async function register(req, res) {
     .then((token) => sendVerificationEmail(user.email, user.name, token))
     .catch((err) => console.error("[register] Failed to send verification email:", err.message));
 
-  setSessionCookie(res, {
+  const token = setSessionCookie(res, {
     userId: user._id.toString(),
     email: user.email,
     tokenVersion: user.tokenVersion ?? 0,
@@ -72,6 +73,7 @@ export async function register(req, res) {
   const userObj = user.toObject();
   delete userObj.password;
   res.status(201).json({
+    token,
     user: {
       ...userObj,
       balance: unitsToCredits(userObj.creditUnits),
@@ -117,7 +119,7 @@ export async function login(req, res) {
     return;
   }
 
-  setSessionCookie(res, {
+  const token = setSessionCookie(res, {
     userId: user._id.toString(),
     email: user.email,
     tokenVersion: user.tokenVersion ?? 0,
@@ -126,6 +128,7 @@ export async function login(req, res) {
   const userObj = user.toObject();
   delete userObj.password;
   res.status(200).json({
+    token,
     user: {
       ...userObj,
       balance: unitsToCredits(userObj.creditUnits ?? CREDITS_CONFIG.FREE_CREDIT_UNITS),
@@ -213,7 +216,7 @@ export async function googleLogin(req, res) {
       return;
     }
 
-    setSessionCookie(res, {
+    const token = setSessionCookie(res, {
       userId: user._id.toString(),
       email: user.email,
       tokenVersion: user.tokenVersion ?? 0,
@@ -222,6 +225,7 @@ export async function googleLogin(req, res) {
     const userObj = user.toObject();
     delete userObj.password;
     res.status(200).json({
+      token,
       user: {
         ...userObj,
         balance: unitsToCredits(userObj.creditUnits ?? CREDITS_CONFIG.FREE_CREDIT_UNITS),
@@ -234,10 +238,10 @@ export async function googleLogin(req, res) {
 }
 
 export async function logout(_req, res) {
-  const sameSite = process.env.COOKIE_SAME_SITE || "lax";
+  const sameSite = process.env.COOKIE_SAME_SITE || "none";
   res.cookie("token", "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: sameSite === "none" ? true : process.env.NODE_ENV === "production",
     sameSite: sameSite,
     maxAge: 0,
     path: "/",

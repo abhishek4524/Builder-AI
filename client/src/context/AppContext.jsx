@@ -49,6 +49,9 @@ export function AppContextProvider({ children }) {
             setUser(data.user);
         } catch (error) {
             setUser(null);
+            if (error?.response?.status === 401) {
+                localStorage.removeItem('token');
+            }
         } finally {
             setLoadingUser(false);
         }
@@ -82,6 +85,9 @@ export function AppContextProvider({ children }) {
     const login = async (email, password) => {
         try {
             const { data } = await api.post('/api/auth/login', { email, password });
+            if (data.token) {
+                localStorage.setItem('token', data.token);
+            }
             setUser(data.user);
             toast.success('Welcome back!');
             navigate('/');
@@ -102,6 +108,9 @@ export function AppContextProvider({ children }) {
     const register = async (name, email, password) => {
         try {
             const { data } = await api.post('/api/auth/register', { name, email, password });
+            if (data.token) {
+                localStorage.setItem('token', data.token);
+            }
             setUser(data.user);
             toast.success('Account created successfully!');
             navigate('/');
@@ -116,6 +125,9 @@ export function AppContextProvider({ children }) {
     const loginWithGoogle = async (credential) => {
         try {
             const { data } = await api.post('/api/auth/google', { credential });
+            if (data.token) {
+                localStorage.setItem('token', data.token);
+            }
             setUser(data.user);
             toast.success('Signed in with Google!');
             navigate('/');
@@ -136,6 +148,9 @@ export function AppContextProvider({ children }) {
     const restoreAccount = useCallback(async (credentials) => {
         try {
             const { data } = await api.post('/api/account/restore', credentials);
+            if (data.token) {
+                localStorage.setItem('token', data.token);
+            }
             setUser(data.user);
             toast.success(data.message || 'Account restored successfully!');
             navigate('/');
@@ -150,14 +165,15 @@ export function AppContextProvider({ children }) {
     const logout = async () => {
         try {
             await api.post('/api/auth/logout');
+            toast.success('Logged out successfully');
+        } catch (error) {
+            console.error('Logout failed:', error);
+        } finally {
+            localStorage.removeItem('token');
             setUser(null);
             setProjects([]);
             setActiveProjects(null);
-            toast.success('Logged out successfully');
             navigate('/login');
-        } catch (error) {
-            console.error('Logout failed:', error);
-            toast.error('Logout failed');
         }
     };
 
