@@ -259,6 +259,7 @@ export function AppContextProvider({ children }) {
             setGeneratingProject(true);
             try {
                 const { data } = await api.post('/api/projects', { prompt });
+                setActiveProjects(data);
                 toast.success('AI Agent is planning structure...');
                 refreshCredits();
                 try {

@@ -1,28 +1,68 @@
 import { useEffect, useRef } from "react";
 import { useAppContext } from "../context/AppContext";
+import api from "../api/api";
 
 /**
- * Custom React hook that streams live server-sent events (SSE) for a project.
- * Uses native EventSource with credentials. Auto-reconnects with exponential
- * backoff on disconnects, and falls back to a one-time API fetch after 3 consecutive failures.
+ * Custom React hook that streams live server-sent events (SSE) for a project
+ * with concurrent polling fallback to ensure real-time progress updates never stall.
  *
  * @param {string} projectId
  */
 export function useProjectEvents(projectId) {
-    const { activeProjects, setActiveProjects, loadProject, refreshCredits } = useAppContext();
+    const { setActiveProjects, loadProject, refreshCredits } = useAppContext();
     const errorCountRef = useRef(0);
     const eventSourceRef = useRef(null);
     const reconnectTimeoutRef = useRef(null);
+    const pollIntervalRef = useRef(null);
 
     useEffect(() => {
         if (!projectId) return;
 
         let isSubscribed = true;
 
+        const stopPolling = () => {
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+            }
+        };
+
+        const startPolling = () => {
+            if (pollIntervalRef.current) return;
+            pollIntervalRef.current = setInterval(async () => {
+                if (!isSubscribed) return;
+                try {
+                    const { data } = await api.get(`/api/projects/${projectId}`);
+                    if (!isSubscribed) return;
+
+                    setActiveProjects((prev) => {
+                        if (!prev) return data;
+                        return {
+                            ...prev,
+                            ...data,
+                            // Preserve filesPlanned if already populated
+                            filesPlanned: data.filesPlanned?.length ? data.filesPlanned : prev.filesPlanned || [],
+                            filesGenerated: data.filesGenerated || prev.filesGenerated || [],
+                        };
+                    });
+
+                    if (["completed", "failed", "cancelled"].includes(data.status)) {
+                        stopPolling();
+                        if (eventSourceRef.current) {
+                            eventSourceRef.current.close();
+                        }
+                        await loadProject(projectId, true);
+                        await refreshCredits();
+                    }
+                } catch {
+                    // Ignore transient network errors during polling
+                }
+            }, 2000);
+        };
+
         const connect = () => {
             if (!isSubscribed) return;
 
-            // Close any existing active connection
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
             }
@@ -39,7 +79,7 @@ export function useProjectEvents(projectId) {
                 errorCountRef.current = 0;
             };
 
-            // Handle Mongo snapshot on connect
+            // Handle snapshot on initial connection
             es.addEventListener("snapshot", (e) => {
                 try {
                     const snapshot = JSON.parse(e.data);
@@ -113,30 +153,28 @@ export function useProjectEvents(projectId) {
                 }
             });
 
-            es.addEventListener("validating", () => {
-                setActiveProjects((prev) => (prev ? { ...prev, status: "revising" } : prev));
-            });
-
             es.addEventListener("completed", async () => {
-                // When generation wraps up, fetch full files from Mongo and refresh credits
+                stopPolling();
+                es.close();
                 await loadProject(projectId, true);
                 await refreshCredits();
-                es.close();
             });
 
             es.addEventListener("failed", async (e) => {
+                stopPolling();
+                es.close();
                 try {
                     const data = JSON.parse(e.data);
                     setActiveProjects((prev) => (prev ? { ...prev, status: "failed", error: data.error } : prev));
                 } catch {}
                 await refreshCredits();
-                es.close();
             });
 
             es.addEventListener("cancelled", async () => {
+                stopPolling();
+                es.close();
                 setActiveProjects((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
                 await refreshCredits();
-                es.close();
             });
 
             es.addEventListener("credits_refunded", async () => {
@@ -147,44 +185,24 @@ export function useProjectEvents(projectId) {
                 es.close();
                 if (!isSubscribed) return;
 
-                errorCountRef.current += 1;
-                console.warn(`[SSE] Connection dropped (attempt ${errorCountRef.current}/3)`);
+                // When SSE drops, start polling so progress NEVER freezes
+                startPolling();
 
-                if (errorCountRef.current >= 3) {
-                    console.warn("[SSE] Stream failed 3 times. Falling back to single REST fetch.");
-                    loadProject(projectId, true);
-                } else {
-                    const backoffMs = Math.min(1000 * Math.pow(2, errorCountRef.current), 6000);
+                if (errorCountRef.current < 2) {
+                    errorCountRef.current += 1;
+                    const backoffMs = Math.min(1000 * Math.pow(2, errorCountRef.current), 4000);
                     reconnectTimeoutRef.current = setTimeout(connect, backoffMs);
                 }
             };
         };
 
-        // Only stream if project is active or we don't have complete files yet
-        const isOngoing =
-            !activeProjects ||
-            activeProjects.status === "queued" ||
-            activeProjects.status === "generating" ||
-            activeProjects.status === "pending" ||
-            activeProjects.status === "revising";
-
-        let pollTimer = null;
-
-        if (isOngoing) {
-            connect();
-            // Resilient fallback polling every 2.5s to guarantee live progress even if SSE drops
-            pollTimer = setInterval(async () => {
-                if (!isSubscribed) return;
-                await loadProject(projectId, true);
-                await refreshCredits();
-            }, 2500);
-        }
+        // Connect SSE stream and activate background live polling
+        connect();
+        startPolling();
 
         return () => {
             isSubscribed = false;
-            if (pollTimer) {
-                clearInterval(pollTimer);
-            }
+            stopPolling();
             if (reconnectTimeoutRef.current) {
                 clearTimeout(reconnectTimeoutRef.current);
             }
@@ -192,5 +210,5 @@ export function useProjectEvents(projectId) {
                 eventSourceRef.current.close();
             }
         };
-    }, [projectId, activeProjects?.status, setActiveProjects, loadProject, refreshCredits]);
+    }, [projectId]); // Depends strictly on projectId — never restarts on intermediate status transitions!
 }
