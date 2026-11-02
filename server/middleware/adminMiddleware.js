@@ -1,5 +1,42 @@
 import jwt from "jsonwebtoken";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { User } from "../models/User.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function getAdminEmails() {
+    let raw = process.env.ADMIN_EMAILS;
+
+    // Fallback: check server/.env directly in case server was started before .env was edited
+    const candidatePaths = [
+        path.resolve(__dirname, "..", ".env"),
+        path.resolve(process.cwd(), "server", ".env"),
+        path.resolve(process.cwd(), ".env"),
+    ];
+
+    for (const p of candidatePaths) {
+        try {
+            if (fs.existsSync(p)) {
+                const content = fs.readFileSync(p, "utf-8");
+                const match = content.match(/^ADMIN_EMAILS=(.*)$/m);
+                if (match && match[1]) {
+                    raw = match[1].trim();
+                    break;
+                }
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    return (raw || "")
+        .split(",")
+        .map((e) => e.replace(/['"]/g, "").trim().toLowerCase())
+        .filter(Boolean);
+}
 
 /**
  * Admin-only middleware.
@@ -13,7 +50,7 @@ export async function adminMiddleware(req, res, next) {
     const token = req.cookies?.token || bearer;
 
     if (!token) {
-        return res.status(401).json({ error: "Access denied." });
+        return res.status(401).json({ error: "Access denied. Please log in." });
     }
 
     let decoded;
@@ -32,13 +69,19 @@ export async function adminMiddleware(req, res, next) {
         return res.status(401).json({ error: "Session expired. Please sign in again." });
     }
 
-    const adminEmails = (process.env.ADMIN_EMAILS || "")
-        .split(",")
-        .map((e) => e.trim().toLowerCase())
-        .filter(Boolean);
+    const adminEmails = getAdminEmails();
+    const userEmail = (user.email || "").trim().toLowerCase();
 
-    if (!adminEmails.includes(user.email.toLowerCase())) {
-        return res.status(403).json({ error: "Admin access only." });
+    if (!adminEmails.includes(userEmail)) {
+        console.warn(`[adminMiddleware] Denied access to "${userEmail}". Configured admins:`, adminEmails);
+        return res.status(403).json({
+            error: "Admin access denied.",
+            userEmail: user.email,
+            configuredAdmins: adminEmails,
+            hint: adminEmails.length === 0
+                ? "No ADMIN_EMAILS found in server/.env. Please restart your server or add your email to server/.env."
+                : `Your email (${user.email}) is not in ADMIN_EMAILS list.`
+        });
     }
 
     req.user = decoded;

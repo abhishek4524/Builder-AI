@@ -213,9 +213,16 @@ export default function AdminDashboard() {
       setRecent(rc.data);
     } catch (err) {
       if (err?.response?.status === 403) {
-        setError("You do not have admin access. Add your email to ADMIN_EMAILS in server/.env");
+        const d = err?.response?.data;
+        setError({
+          message: d?.hint || d?.error || "You do not have admin access.",
+          userEmail: d?.userEmail || user?.email,
+          configuredAdmins: d?.configuredAdmins,
+        });
       } else {
-        setError(err?.response?.data?.error || "Failed to load admin data.");
+        setError({
+          message: err?.response?.data?.error || "Failed to load admin data.",
+        });
       }
     } finally {
       setLoading(false);
@@ -256,18 +263,44 @@ export default function AdminDashboard() {
   }
 
   if (error) {
+    const errorMsg = typeof error === "object" ? error.message : error;
+    const currentEmail = (typeof error === "object" && error.userEmail) || user?.email;
+
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center p-6">
-        <Card className="p-8 max-w-md text-center space-y-4">
-          <XCircleIcon className="mx-auto text-red-500" size={40} />
-          <h2 className="text-base font-bold text-zinc-900 dark:text-white">Access Denied</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">{error}</p>
-          <button
-            onClick={() => navigate("/")}
-            className="px-4 py-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold rounded-xl cursor-pointer"
-          >
-            Go Home
-          </button>
+        <Card className="p-8 max-w-md w-full text-center space-y-4">
+          <XCircleIcon className="mx-auto text-red-500" size={44} />
+          <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Access Denied</h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">{errorMsg}</p>
+
+          {currentEmail && (
+            <div className="bg-zinc-100 dark:bg-zinc-800/80 rounded-xl p-3 text-left border border-zinc-200 dark:border-zinc-700/60">
+              <p className="text-[10px] uppercase font-semibold text-zinc-400 tracking-wider mb-1">
+                Your Logged-in Email
+              </p>
+              <p className="text-xs font-mono font-bold text-zinc-900 dark:text-white break-all">
+                {currentEmail}
+              </p>
+              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-2">
+                Make sure this exact email is added to <code className="bg-zinc-200 dark:bg-zinc-700 px-1 py-0.5 rounded font-mono text-[10px]">ADMIN_EMAILS</code> in <code className="font-mono text-[10px]">server/.env</code>.
+              </p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <button
+              onClick={() => fetchAll()}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              onClick={() => navigate("/")}
+              className="px-4 py-2 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+            >
+              Go Home
+            </button>
+          </div>
         </Card>
       </div>
     );
