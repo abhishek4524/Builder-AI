@@ -163,16 +163,20 @@ Animations make the difference between a static mockup and a live product. Alway
 
 ---
 
-## 6. ICONS (Font Awesome v6 Free)
+## 6. ICONS (Font Awesome CSS & Lucide Icons)
 
-Font Awesome stylesheet is loaded globally. Use it for all icons.
-- Solid icons: \`<i className='fa-solid fa-rocket'></i>\`
-- Brand icons: \`<i className='fa-brands fa-github'></i>\`
-- Regular icons: \`<i className='fa-regular fa-clock'></i>\`
+Font Awesome stylesheet (v6 Free) is loaded globally via CDN in the HTML template.
+- HOW TO RENDER ICONS: Use plain HTML <i> tags directly with Font Awesome classes:
+  * Solid icons: \`<i className='fa-solid fa-rocket'></i>\`
+  * Brand icons: \`<i className='fa-brands fa-github'></i>\`
+  * Regular icons: \`<i className='fa-regular fa-clock'></i>\`
+- OR you can import icons from 'lucide-react':
+  * E.g.: \`import { Rocket, ArrowRight, Star, Check, Shield } from 'lucide-react';\` and render \`<Rocket className='w-5 h-5' />\`
+- FORBIDDEN IMPORT:
+  * NEVER DO: \`import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'\` or \`import ... from '@fortawesome/free-solid-svg-icons'\`
+  * Always use standard \`<i className='fa-solid fa-...'></i>\` tags directly in JSX, OR use 'lucide-react'.
 
-Common icon names: \`fa-rocket\`, \`fa-bolt\`, \`fa-shield-halved\`, \`fa-chart-line\`, \`fa-gears\`, \`fa-wand-magic-sparkles\`, \`fa-cubes\`, \`fa-code\`, \`fa-layer-group\`, \`fa-star\`, \`fa-check\`, \`fa-xmark\`, \`fa-bars\`, \`fa-envelope\`, \`fa-phone\`, \`fa-location-dot\`, \`fa-arrow-right\`, \`fa-circle-check\`, \`fa-github\`, \`fa-twitter\`, \`fa-linkedin\`, \`fa-facebook\`, \`fa-instagram\`.
-
-Do NOT generate custom SVG icons. Use Font Awesome exclusively.
+Common Font Awesome icon names: \`fa-rocket\`, \`fa-bolt\`, \`fa-shield-halved\`, \`fa-chart-line\`, \`fa-gears\`, \`fa-wand-magic-sparkles\`, \`fa-cubes\`, \`fa-code\`, \`fa-layer-group\`, \`fa-star\`, \`fa-check\`, \`fa-xmark\`, \`fa-bars\`, \`fa-envelope\`, \`fa-phone\`, \`fa-location-dot\`, \`fa-arrow-right\`, \`fa-circle-check\`, \`fa-github\`, \`fa-twitter\`, \`fa-linkedin\`, \`fa-facebook\`, \`fa-instagram\`.
 
 ---
 
